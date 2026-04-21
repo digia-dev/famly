@@ -1,0 +1,23 @@
+{
+  "short_name": "Famly",
+  "name": "Famly Wealth Platform",
+  "description": "Private wealth and financial orchestration platform.",
+  "icons": [
+    {
+      "src": "/logo-192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "/logo-512.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#f9f9fe",
+  "display": "standalone",
+  "scope": "/",
+  "theme_color": "#f9f9fe",
+  "orientation": "portrait"
+}

@@ -1,0 +1,1 @@
+<img src="{{ asset('icon_DinsWealth.png') }}" alt="Logo DinsWealth" class="w-16 h-16">
