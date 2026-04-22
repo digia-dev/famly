@@ -47,6 +47,13 @@
 
             [x-cloak] { display: none !important; }
 
+            /* Advanced Overlay for Glassmorphism */
+            .glass-overlay {
+                backdrop-filter: blur(20px) saturate(180%);
+                -webkit-backdrop-filter: blur(20px) saturate(180%);
+                background-color: rgba(255, 255, 255, 0.7);
+            }
+
             /* Background Pattern Global */
             .global-bg-pattern {
                 position: fixed;
@@ -69,9 +76,20 @@
             @endauth
             
             <!-- Main Content Wrapper (With Bottom Nav Safe Area) -->
-            <div class="{{ (request()->is('admin/dashboard*') || request()->routeIs(['ai.assistant', 'reports.analysis'])) ? 'sm:ml-64 pb-32' : 'sm:ml-64 pt-14 pb-24' }} transition-all duration-300">
+            <div class="{{ (request()->is('admin/dashboard*') || request()->routeIs(['ai.assistant', 'reports.*'])) ? 'sm:ml-64 pb-32' : 'sm:ml-64 pt-14 pb-24' }} transition-all duration-300">
                 <main>
-                    {{ $slot }}
+                    @if(session('success'))
+                        <x-toast type="success" :message="session('success')" />
+                    @endif
+                    @if(session('error'))
+                        <x-toast type="error" :message="session('error')" />
+                    @endif
+                    @if(session('status'))
+                        <x-toast type="info" :message="session('status')" />
+                    @endif
+
+                    @yield('content')
+                    {{ $slot ?? '' }}
                 </main>
             </div>
         </div>

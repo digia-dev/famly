@@ -1,14 +1,28 @@
 <x-app-layout>
-    @section('title', 'Riwayat Transaksi')
+    @section('title', 'Log Keuangan')
 
-    <div class="bg-[#F6F7F8] min-h-screen pb-32">
-        <!-- Compact Filter Section (Super App Style) -->
-        <div class="bg-white/80 backdrop-blur-md px-4 pt-4 pb-3 sticky top-12 z-40">
-            <div class="max-w-screen-xl mx-auto">
-                <div class="flex gap-2 bg-slate-50 p-1 rounded-2xl border border-slate-100">
-                    @foreach(['week' => 'Minggu', 'month' => 'Bulan', 'year' => 'Tahun'] as $key => $label)
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Plus Jakarta Sans', sans-serif !important; background-color: #F7F9FA; }
+        .no-line-card { background-color: #FFFFFF; border: none; box-shadow: 0 4px 20px -10px rgba(0,0,0,0.05); }
+        .tonal-bg { background-color: #F0F2F5; }
+        .sticky-custom { position: sticky; top: 0; z-index: 50; }
+    </style>
+
+    <div class="min-h-screen pb-40">
+        <!-- Dashboard Style Header -->
+        <div class="bg-white px-6 pt-12 pb-6 rounded-b-[40px] shadow-sm mb-6">
+            <div class="max-w-2xl mx-auto flex items-center justify-between">
+                <div>
+                    <h1 class="text-xl font-extrabold text-slate-800 tracking-tight">Log Keuangan</h1>
+                    <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
+                        {{ $activeGroup ? $activeGroup->name . ' (Grup)' : 'Pribadi' }}
+                    </p>
+                </div>
+                <div class="flex items-center gap-2">
+                    @foreach(['week' => 'Minggu', 'month' => 'Bulan'] as $key => $label)
                         <a href="{{ route('transaction.index', ['filter' => $key]) }}" 
-                           class="flex-1 py-1.5 text-[11px] font-bold text-center rounded-xl transition-all {{ $filter == $key ? 'bg-white text-primary shadow-sm' : 'text-slate-400 hover:text-slate-600' }}">
+                           class="px-4 py-2 text-[10px] font-black uppercase tracking-widest rounded-2xl transition-all {{ $filter == $key ? 'bg-[#00AA13] text-white shadow-lg shadow-emerald-500/20' : 'bg-slate-50 text-slate-400' }}">
                             {{ $label }}
                         </a>
                     @endforeach
@@ -16,65 +30,78 @@
             </div>
         </div>
 
-        <main class="max-w-screen-xl mx-auto px-4 py-4 space-y-4">
+        <div class="max-w-2xl mx-auto px-6 space-y-8">
             @forelse($groupedTransactions as $dateLabel => $data)
-                <!-- Group Section (Neat & Tidy) -->
-                <section class="space-y-2">
-                    <div class="flex items-center justify-between px-1">
-                        <h2 class="text-[12px] font-bold text-slate-800 tracking-tight">
+                <div>
+                    <div class="flex items-center justify-between mb-4 sticky top-16 bg-[#F7F9FA]/80 backdrop-blur-md py-2 z-30">
+                        <h3 class="text-[11px] font-black text-slate-400 uppercase tracking-widest">
                             {{ $data['date']->isToday() ? 'Hari Ini' : ($data['date']->isYesterday() ? 'Kemarin' : $dateLabel) }}
-                        </h2>
-                        <span class="text-[9px] font-bold text-slate-400 uppercase tracking-widest">
-                            {{ $data['net'] > 0 ? '+' : '-' }}Rp {{ number_format(abs($data['net']), 0, ',', '.') }}
-                        </span>
+                        </h3>
+                        <div class="px-3 py-1 tonal-bg rounded-full text-[10px] font-extrabold text-slate-600">
+                            Net: <span class="{{ $data['net'] >= 0 ? 'text-[#00AA13]' : 'text-rose-500' }}">
+                                {{ $data['net'] >= 0 ? '+' : '-' }}Rp{{ number_format(abs($data['net']), 0, ',', '.') }}
+                            </span>
+                        </div>
                     </div>
 
-                    <div class="grid grid-cols-1 gap-1.5">
+                    <div class="space-y-3">
                         @foreach($data['items'] as $item)
-                            <div class="bg-white p-3 rounded-2xl border border-slate-100 flex items-center justify-between group active:scale-[0.99] transition-all cursor-pointer">
-                                <div class="flex items-center gap-3">
-                                    <div class="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400 group-hover:bg-primary/5 group-hover:text-primary transition-all">
-                                        <span class="material-symbols-outlined text-[20px]" style="font-variation-settings: 'FILL' 1;">
+                            <div class="no-line-card p-4 rounded-[28px] flex items-center justify-between group active:scale-[0.98] transition-all cursor-pointer">
+                                <div class="flex items-center gap-4">
+                                    <div class="w-12 h-12 rounded-[20px] {{ $item->kategoriJenis->jenis == 'Pemasukan' ? 'bg-emerald-50 text-[#00AA13]' : 'bg-slate-50 text-slate-500' }} flex items-center justify-center transition-colors">
+                                        <span class="material-symbols-outlined text-[22px]" style="font-variation-settings: 'FILL' 1;">
                                             {{ $item->kategoriNama->icon ?? ($item->kategoriJenis->jenis == 'Pemasukan' ? 'add_card' : 'payments') }}
                                         </span>
                                     </div>
                                     <div>
-                                        <p class="text-[13px] font-bold text-slate-900 leading-tight">{{ $item->keterangan ?? ($item->kategoriNama->nama ?? 'Lainnya') }}</p>
-                                        <p class="text-[10px] text-slate-400 font-medium mt-0.5">
-                                            {{ $item->kategoriNama->nama ?? 'Umum' }} • {{ $item->created_at->format('H:i') }}
+                                        <p class="text-[13px] font-extrabold text-slate-800 leading-tight">
+                                            {{ $item->keterangan ?? ($item->kategoriNama->nama ?? 'Tanpa Keterangan') }}
                                         </p>
+                                        <div class="flex items-center gap-2 mt-1">
+                                            <span class="text-[10px] font-bold text-slate-400">{{ $item->kategoriNama->nama ?? 'Umum' }}</span>
+                                            <span class="w-1 h-1 rounded-full bg-slate-200"></span>
+                                            <span class="text-[10px] font-bold text-slate-300 uppercase tracking-tighter">{{ $item->created_at->format('H:i') }}</span>
+                                        </div>
                                     </div>
                                 </div>
                                 <div class="text-right">
-                                    <p class="text-[13px] font-extrabold {{ $item->kategoriJenis->jenis == 'Pemasukan' ? 'text-primary' : 'text-slate-900' }}">
+                                    <p class="text-[14px] font-black {{ $item->kategoriJenis->jenis == 'Pemasukan' ? 'text-[#00AA13]' : 'text-slate-900' }}">
                                         {{ $item->kategoriJenis->jenis == 'Pemasukan' ? '+' : '-' }}Rp{{ number_format($item->nominal, 0, ',', '.') }}
                                     </p>
+                                    @if($item->wallet)
+                                        <p class="text-[9px] font-black text-slate-300 uppercase mt-0.5">{{ $item->wallet->nama }}</p>
+                                    @endif
                                 </div>
                             </div>
                         @endforeach
                     </div>
-                </section>
+                </div>
             @empty
-                <div class="p-10 text-center bg-white rounded-3xl border border-dashed border-slate-200">
-                    <span class="material-symbols-outlined text-3xl text-slate-200 mb-2">history</span>
-                    <p class="text-[11px] font-bold text-slate-400 italic">Belum ada aktivitas transaksi</p>
+                <div class="py-20 text-center">
+                    <div class="w-20 h-20 bg-slate-50 rounded-[32px] flex items-center justify-center mx-auto mb-6">
+                        <span class="material-symbols-outlined text-[32px] text-slate-200">history_toggle_off</span>
+                    </div>
+                    <p class="text-[13px] font-extrabold text-slate-800">Belum ada catatan</p>
+                    <p class="text-[11px] font-bold text-slate-400 mt-1 leading-relaxed max-w-[200px] mx-auto">
+                        Mulai catat transaksi Anda melalui @Fams atau tombol tambah.
+                    </p>
                 </div>
             @endforelse
-        </main>
+        </div>
 
-        <!-- Dynamic Analysis CTA (Small & Professional) -->
-        <div class="fixed bottom-24 left-0 right-0 px-4 z-40">
-            <a href="{{ route('reports.analysis') }}" class="max-w-screen-xl mx-auto bg-slate-900 p-3 rounded-2xl shadow-xl flex justify-between items-center group active:scale-[0.98] transition-all">
-                <div class="flex items-center gap-3">
-                    <div class="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center text-white">
-                        <span class="material-symbols-outlined text-[18px]">query_stats</span>
+        <!-- Floating Insight CTA -->
+        <div class="fixed bottom-24 left-6 right-6 z-50">
+            <a href="{{ route('reports.analysis') }}" class="max-w-xl mx-auto bg-slate-900 py-4 px-6 rounded-[30px] shadow-2xl flex items-center justify-between group active:scale-95 transition-all">
+                <div class="flex items-center gap-4">
+                    <div class="w-10 h-10 rounded-2xl bg-white/10 flex items-center justify-center text-white">
+                        <span class="material-symbols-outlined text-[20px]">smart_toy</span>
                     </div>
                     <div>
-                        <p class="text-[11px] font-bold text-white tracking-tight">Analisis Keuangan Lengkap</p>
-                        <p class="text-[9px] font-medium text-white/50">Optimalkan pengeluaran keluarga Anda</p>
+                        <p class="text-[12px] font-black text-white tracking-tight">Butuh Insight AI?</p>
+                        <p class="text-[10px] font-bold text-white/40">Lihat analisis pengeluaran mingguan Anda</p>
                     </div>
                 </div>
-                <span class="material-symbols-outlined text-white text-sm group-hover:translate-x-1 transition-transform">chevron_right</span>
+                <span class="material-symbols-outlined text-white/50 group-hover:text-white group-hover:translate-x-1 transition-all">arrow_forward</span>
             </a>
         </div>
     </div>

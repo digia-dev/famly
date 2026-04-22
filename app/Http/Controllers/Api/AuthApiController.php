@@ -45,9 +45,11 @@ class AuthApiController extends ApiController
         ]);
 
         return \DB::transaction(function() use ($request) {
-            // 1. Create Family
-            $family = \App\Models\Family::create([
-                'family_name' => "Keluarga " . explode(' ', $request->name)[0]
+            // 1. Create Group (formerly Family)
+            $group = \App\Models\Group::create([
+                'name' => "Keluarga " . explode(' ', $request->name)[0],
+                'type' => 'Family',
+                'invite_code' => strtoupper(\Illuminate\Support\Str::random(10)),
             ]);
 
             // 2. Create User
@@ -56,15 +58,30 @@ class AuthApiController extends ApiController
                 'email' => $request->email,
                 'password' => Hash::make($request->password),
                 'role' => 'dins',
-                'family_id' => $family->id
+                'group_id' => $group->id,
+                'current_group_id' => $group->id,
             ]);
 
-            // 3. Seed 기본 Wallet
+            // Set admin_id for the group
+            $group->update(['admin_id' => $user->id]);
+
+            // Add user to group_members table
+            \DB::table('group_members')->insert([
+                'group_id' => $group->id,
+                'user_id' => $user->id,
+                'role' => 'admin',
+                'status' => 'Active',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            // 3. Seed basic Wallet
             \App\Models\KategoriNamaTabungan::create([
                 'nama' => 'Dompet Utama',
                 'icon' => 'account_balance_wallet',
-                'family_id' => $family->id,
-                'wallet_type' => 'wallet'
+                'group_id' => $group->id,
+                'wallet_type' => 'wallet',
+                'user_id' => $user->id,
             ]);
 
             $token = $user->createToken('auth_token')->plainTextToken;

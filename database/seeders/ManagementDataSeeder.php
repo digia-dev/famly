@@ -15,7 +15,7 @@ class ManagementDataSeeder extends Seeder
         $user = User::first();
         if (!$user) return;
         
-        $family_id = $user->family_id;
+        $groupId = $user->current_group_id;
         $jenisPemasukan = KategoriJenisTabungan::where('jenis', 'Pemasukan')->first();
         $jenisPengeluaran = KategoriJenisTabungan::where('jenis', 'Pengeluaran')->first();
 
@@ -96,8 +96,8 @@ class ManagementDataSeeder extends Seeder
             unset($item['initial_balance']);
             
             $wallet = KategoriNamaTabungan::updateOrCreate(
-                ['nama' => $item['nama'], 'family_id' => $family_id],
-                array_merge($item, ['family_id' => $family_id])
+                ['nama' => $item['nama'], 'group_id' => $groupId],
+                array_merge($item, ['group_id' => $groupId, 'user_id' => $user->id])
             );
 
             // Create initial balance transaction if not exists
@@ -106,11 +106,12 @@ class ManagementDataSeeder extends Seeder
                     [
                         'nama' => $wallet->id,
                         'keterangan' => 'Saldo Awal: ' . $wallet->nama,
-                        'family_id' => $family_id
+                        'group_id' => $groupId
                     ],
                     [
                         'jenis' => $jenisPemasukan->id,
                         'nominal' => $initialBalance,
+                        'user_id' => $user->id,
                         'created_at' => now()->subDays(1),
                     ]
                 );

@@ -9,6 +9,19 @@ module.exports = {
 
         './app/Helpers/**/*.php',
     ],
+    safelist: [
+        'bg-emerald-700',
+        'bg-rose-700',
+        'bg-slate-900',
+        'bg-blue-600',
+        'bg-amber-600',
+        'bg-white',
+        'text-white',
+        'text-slate-900',
+        'text-slate-500',
+        'text-emerald-600',
+        'text-amber-600'
+    ],
     theme: {
         extend: {
             fontFamily: {

@@ -11,7 +11,7 @@ class KategoriNamaTabungan extends Model
 
     protected static function booted(): void
     {
-        static::addGlobalScope(new \App\Models\Scopes\FamilyScope);
+        static::addGlobalScope(new \App\Models\Scopes\GroupScope);
     }
 
     protected $fillable = [
@@ -19,17 +19,30 @@ class KategoriNamaTabungan extends Model
         'kategori_kas',
         'target_saldo',
         'icon',
-        'family_id',
+        'group_id',
         'wallet_type',
         'status',
         'color',
+        'is_group',
+        'user_id',
+        'reminder_limit',
+        'is_reminder_active',
+        'target_date',
+        'description',
+        'image_url',
+        'milestones',
     ];
 
     protected $appends = ['balance'];
 
-    public function family()
+    public function group()
     {
-        return $this->belongsTo(Family::class);
+        return $this->belongsTo(Group::class, 'group_id');
+    }
+
+    public function owner()
+    {
+        return $this->belongsTo(User::class, 'user_id');
     }
 
     public function transactions()

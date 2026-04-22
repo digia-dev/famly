@@ -4,6 +4,8 @@ namespace App\Services;
 
 use App\Models\Tabungan;
 use App\Models\KategoriNamaTabungan;
+use App\Models\User;
+use App\Models\Group;
 use Illuminate\Support\Facades\Http;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -32,24 +34,64 @@ class AiFinancialInsight
     }
 
     /**
-     * Memeriksa kuota harian penggunaan AI (Max 50/hari per Keluarga).
+     * Memeriksa kuota harian penggunaan AI.
+     * Aturan: Unlimited untuk Grup/Premium, 3x/hari untuk Personal Trial.
      */
-    private function checkDailyQuota()
+    public function checkDailyQuota($isGroupContext = false)
     {
-        return true;
+        $user = Auth::user();
+        if (!$user) return false;
+
+        // Premium users have no limits
+        if ($user->isPremium()) return true;
+
+        // Group contexts (@Fams or active group) are unlimited for now
+        if ($isGroupContext) return true;
+
+        // Personal context: Limit to 3x per day for Trial
+        return $user->ai_usage_count < 3;
+    }
+
+    /**
+     * Increment the AI usage count for the user.
+     */
+    public function incrementUsage()
+    {
+        $user = Auth::user();
+        if ($user && !$user->isPremium()) {
+            $user->increment('ai_usage_count');
+        }
+    }
+
+    /**
+     * Detect financial anomalies (Spikes in spending).
+     */
+    public function detectAnomalies()
+    {
+        $data = $this->prepareFinancialData();
+        
+        if ($data['anomali_detected']) {
+            $diff = $data['pengeluaran_hari_ini'] - ($data['total_pengeluaran'] / max(1, now()->day));
+            return "Waspada! Pengeluaran hari ini (Rp " . number_format($data['pengeluaran_hari_ini']) . ") jauh di atas rata-rata harian Anda. Ada lonjakan sekitar Rp " . number_format($diff) . " kawan!";
+        }
+        
+        return null; // All good
     }
 
     public function getInsight()
     {
-        return cache()->remember('ai_insight_' . Auth::id(), 60 * 6, function() {
-            if (!$this->checkDailyQuota()) {
-                return "Kuota harian AI Anda telah habis (Maks 50). Silakan coba lagi besok untuk menjaga efisiensi biaya!";
+        $groupId = Auth::user()->current_group_id;
+        $isGroup = (bool)$groupId;
+
+        return cache()->remember('ai_insight_' . Auth::id() . '_' . $groupId, 60 * 6, function() use ($isGroup) {
+            if (!$this->checkDailyQuota($isGroup)) {
+                return "Kuota harian AI Personal Anda telah habis (Maks 3). Gunakan di Grup atau Upgrade ke Premium untuk akses tanpa batas!";
             }
 
             $dataContext = $this->prepareFinancialData();
             
             if (empty($this->apiKey)) {
-                return "AI Insight: Keuangan keluarga Anda terlihat stabil bulan ini. Terus pantau pengeluaran untuk mencapai target tabungan!";
+                return "AI Insight: Keuangan Anda terlihat stabil bulan ini. Terus pantau pengeluaran untuk mencapai target tabungan!";
             }
 
             return $this->askAi($dataContext);
@@ -153,24 +195,34 @@ class AiFinancialInsight
         }
 
         $now = Carbon::now();
-        $familyId = Auth::user()->family_id;
+        $user = Auth::user();
+        $groupId = $user->current_group_id;
 
         // 1. Consolidated Financial Metrics (Single Query)
-        $sums = Tabungan::query()
-            ->join('kategori_jenis_tabungans', 'tabungans.jenis', '=', 'kategori_jenis_tabungans.id')
-            ->where('tabungans.family_id', $familyId)
-            ->selectRaw("
+        $query = Tabungan::query()
+            ->join('kategori_jenis_tabungans', 'tabungans.jenis', '=', 'kategori_jenis_tabungans.id');
+
+        if ($groupId) {
+            $query->where('tabungans.group_id', $groupId);
+        } else {
+            $query->where('tabungans.user_id', $user->id)
+                  ->whereNull('tabungans.group_id');
+        }
+
+        $sums = $query->selectRaw("
                 SUM(CASE WHEN kategori_jenis_tabungans.jenis = 'Pemasukan' THEN tabungans.nominal ELSE 0 END) as total_in_all,
                 SUM(CASE WHEN kategori_jenis_tabungans.jenis = 'Pengeluaran' THEN tabungans.nominal ELSE 0 END) as total_out_all,
                 SUM(CASE WHEN kategori_jenis_tabungans.jenis = 'Pemasukan' AND MONTH(tabungans.created_at) = ? AND YEAR(tabungans.created_at) = ? THEN tabungans.nominal ELSE 0 END) as month_in,
                 SUM(CASE WHEN kategori_jenis_tabungans.jenis = 'Pengeluaran' AND MONTH(tabungans.created_at) = ? AND YEAR(tabungans.created_at) = ? THEN tabungans.nominal ELSE 0 END) as month_out,
                 SUM(CASE WHEN kategori_jenis_tabungans.jenis = 'Pengeluaran' AND DATE(tabungans.created_at) = ? THEN tabungans.nominal ELSE 0 END) as today_out,
-                SUM(CASE WHEN kategori_jenis_tabungans.jenis = 'Pengeluaran' AND MONTH(tabungans.created_at) = ? AND YEAR(tabungans.created_at) = ? THEN tabungans.nominal ELSE 0 END) as last_month_out
+                SUM(CASE WHEN kategori_jenis_tabungans.jenis = 'Pengeluaran' AND MONTH(tabungans.created_at) = ? AND YEAR(tabungans.created_at) = ? THEN tabungans.nominal ELSE 0 END) as last_month_out,
+                SUM(CASE WHEN kategori_jenis_tabungans.jenis = 'Pengeluaran' AND tabungans.created_at >= ? THEN tabungans.nominal ELSE 0 END) as last_14_days_out
             ", [
                 $now->month, $now->year,
                 $now->month, $now->year,
                 $now->toDateString(),
-                $now->copy()->subMonth()->month, $now->copy()->subMonth()->year
+                $now->copy()->subMonth()->month, $now->copy()->subMonth()->year,
+                $now->copy()->subDays(14)->toDateTimeString()
             ])
             ->first();
 
@@ -179,27 +231,49 @@ class AiFinancialInsight
         $pengeluaranBulanIni = $sums->month_out ?? 0;
         $pengeluaranHariIni = $sums->today_out ?? 0;
         $pengeluaranBulanLalu = $sums->last_month_out ?? 0;
+        $pengeluaran14Hari = $sums->last_14_days_out ?? 0;
+        
+        $avgDailySpend = $pengeluaran14Hari / 14;
+        if ($avgDailySpend <= 0) {
+            $avgDailySpend = $pengeluaranBulanIni / max(1, $now->day);
+        }
 
         // 2. Optimized Activity Today (Limited)
-        $transaksiHariIni = Tabungan::query()
+        $activityQuery = Tabungan::query()
             ->join('kategori_nama_tabungans', 'tabungans.nama', '=', 'kategori_nama_tabungans.id')
             ->join('kategori_jenis_tabungans', 'tabungans.jenis', '=', 'kategori_jenis_tabungans.id')
             ->where('kategori_jenis_tabungans.jenis', 'Pengeluaran')
-            ->whereDate('tabungans.created_at', $now->today())
-            ->take(3)
+            ->whereDate('tabungans.created_at', $now->today());
+
+        if ($groupId) {
+            $activityQuery->where('tabungans.group_id', $groupId);
+        } else {
+            $activityQuery->where('tabungans.user_id', $user->id)
+                          ->whereNull('tabungans.group_id');
+        }
+
+        $transaksiHariIni = $activityQuery->take(3)
             ->get()
             ->map(fn($t) => ($t->nama ?? 'Umum') . ": " . ($t->keterangan ?? 'Transaksi'))
             ->implode(', ');
 
         // 3. Optimized Top Category (Joined with Name)
-        $topCategory = Tabungan::query()
+        $topCatQuery = Tabungan::query()
             ->join('kategori_jenis_tabungans', 'tabungans.jenis', '=', 'kategori_jenis_tabungans.id')
             ->join('kategori_nama_tabungans', 'tabungans.nama', '=', 'kategori_nama_tabungans.id')
             ->select('kategori_nama_tabungans.nama', \DB::raw('SUM(tabungans.nominal) as total'))
             ->where('kategori_jenis_tabungans.jenis', 'Pengeluaran')
             ->whereMonth('tabungans.created_at', $now->month)
-            ->whereYear('tabungans.created_at', $now->year)
-            ->groupBy('kategori_nama_tabungans.nama')
+            ->whereYear('tabungans.created_at', $now->year);
+
+        if ($groupId) {
+            $topCatQuery->where('tabungans.group_id', $groupId);
+        } else {
+            $topCatQuery->where('tabungans.user_id', $user->id)
+                        ->whereNull('tabungans.group_id');
+        }
+
+        $topCategory = $topCatQuery->groupBy('kategori_nama_tabungans.nama')
             ->orderByDesc('total')
             ->first();
 
@@ -217,7 +291,8 @@ class AiFinancialInsight
 
         self::$requestCache = [
             'nama_user' => Auth::user()->name,
-            'nama_keluarga' => Auth::user()->family->family_name ?? 'Keluarga',
+            'konteks_nama' => $groupId ? Auth::user()->currentGroup->name : 'Pribadi',
+            'konteks_tipe' => $groupId ? 'Grup' : 'Pribadi',
             'bulan_ini' => $now->translatedFormat('F Y'),
             'saldo_real' => $saldoReal,
             'total_pemasukan' => $pemasukanBulanIni,
@@ -227,6 +302,20 @@ class AiFinancialInsight
             'status_pengeluaran' => $statusNaikTurun,
             'persentase_perubahan' => abs($persen) . '%',
             'kategori_boros' => $namaKategoriTop,
+            'anomali_detected' => $pengeluaranHariIni > ($pengeluaranBulanIni / max(1, $now->day) * 2.5), // Spike 2.5x vs avg
+            'hero_name' => User::whereHas('tabungan', function($q) use ($now, $groupId, $user) {
+                    $q->whereBetween('created_at', [$now->copy()->startOfWeek(), $now->copy()->endOfWeek()]);
+                    if ($groupId) $q->where('group_id', $groupId);
+                    else $q->where('user_id', $user->id);
+                })
+                ->withCount(['tabungan' => function($q) use ($now, $groupId, $user) {
+                    $q->whereBetween('created_at', [$now->copy()->startOfWeek(), $now->copy()->endOfWeek()]);
+                    if ($groupId) $q->where('group_id', $groupId);
+                    else $q->where('user_id', $user->id);
+                }])
+                ->orderByDesc('tabungan_count')
+                ->first()->name ?? 'N/A',
+            'days_remaining' => $saldoReal > 0 ? floor($saldoReal / max(1, $avgDailySpend)) : 0
         ];
 
         return self::$requestCache;
@@ -246,9 +335,11 @@ class AiFinancialInsight
             - Kategori Terboros: {$data['kategori_boros']}
             - Pengeluaran Bulan Ini: Rp " . number_format($data['total_pengeluaran']) . "
             - Tren: {$data['status_pengeluaran']} ({$data['persentase_perubahan']})
+            - Prediksi Saldo Habis (Burn Rate): {$data['days_remaining']} hari lagi
             
             TUGAS:
             Hasilkan 4 item eksplorasi keuangan yang berbeda.
+            Salah satu item HARUS membahas tentang 'Prediksi Saldo Habis' (Burn Rate) jika angkanya di bawah 30 hari.
             Setiap item harus unik (1 tips, 1 kesimpulan AI, 1 penawaran fiktif, 1 info fitur).
             Format output HARUS JSON ARRAY:
             [
@@ -258,7 +349,7 @@ class AiFinancialInsight
                 \"category\": \"Kategori (Kesimpulan AI/Tips/Penawaran)\",
                 \"title\": \"Judul Menarik\",
                 \"description\": \"Penjelasan singkat\",
-                \"bg\": \"Warna (bg-white / bg-emerald-700 / bg-slate-900 / bg-blue-600)\",
+                \"bg\": \"Warna (bg-white / bg-emerald-700 / bg-amber-600 / bg-blue-600)\",
                 \"text\": \"Warna Teks (text-white / text-slate-900)\",
                 \"action_label\": \"Label Tombol\",
                 \"action_url\": \"URL (biarkan # atau route yang relevan)\"
@@ -403,13 +494,19 @@ class AiFinancialInsight
      */
     public function chat($message)
     {
-        if (!$this->checkDailyQuota()) {
-            return "Maaf, kuota bertanya pada AI hari ini sudah mencapai batas (50x). Mari berhemat dan tanya lagi besok!";
+        $isGroupContext = str_contains($message, '@Fams') || Auth::user()->current_group_id;
+
+        if (!$this->checkDailyQuota($isGroupContext)) {
+            return "Maaf, kuota bertanya pada AI Personal hari ini sudah mencapai batas (3x). Gunakan di Grup (Tag @Fams) atau tanya lagi besok!";
+        }
+
+        if (!$isGroupContext) {
+            $this->incrementUsage();
         }
 
         $data = $this->prepareFinancialData();
         
-        // Ambil daftar semua dompet/pos/tabungan yang tersedia
+        // Ambil daftar semua dompet/pos/tabungan yang tersedia (Scoped by GroupScope)
         $wallets = KategoriNamaTabungan::all()->map(function($w) {
             $totalIn = Tabungan::where('nama', $w->id)->whereHas('kategoriJenis', fn($q) => $q->where('jenis', 'Pemasukan'))->sum('nominal');
             $totalOut = Tabungan::where('nama', $w->id)->whereHas('kategoriJenis', fn($q) => $q->where('jenis', 'Pengeluaran'))->sum('nominal');
@@ -450,11 +547,25 @@ class AiFinancialInsight
         DAFTAR POS/TABUNGAN:
         {$wallets}
         
-        10 TRANSAKSI TERAKHIR:
-        {$recentTransactions}
-        
         PERTANYAAN USER: \"{$message}\"
+        
+        INFO TEKNIS (KHUSUS SUBSCRIBER):
+        - Deteksi Anomali: " . ($data['anomali_detected'] ? 'ADA LONJAKAN' : 'NORMAL') . "
+        - Family Hero (Mingguan): {$data['hero_name']}
+        - Prediksi Saldo Habis (Burn Rate): {$data['days_remaining']} hari lagi
         ";
+
+        // Logic @Fams for Group Orchestration
+        if (str_contains($message, '@Fams')) {
+            $prompt .= "
+            CATATAN KHUSUS @Fams:
+            User menggunakan tag @Fams. Ini berarti Anda sedang berbicara dalam konteks KONTEKS GRUP/KOMUNITAS.
+            TUGAS TAMBAHAN:
+            1. Puji atau Mention **{$data['hero_name']}** jika performanya bagus agar yang lain termotivasi.
+            2. PERIKSA ANOMALI: Jika 'ADA LONJAKAN', tanyakan ke grup apakah ini pengeluaran yang sudah direncanakan atau 'tamu tak diundang'.
+            3. Fokus pada kolaborasi, bukan hanya pengeluaran individu. Berikan Analisis Transparansi.
+            ";
+        }
 
         return $this->askAi($prompt);
     }
@@ -464,9 +575,12 @@ class AiFinancialInsight
      */
     public function analyzeReceipt($imageBase64)
     {
-        if (!$this->checkDailyQuota()) {
-            throw new \Exception("Kuota analisis struk harian habis (Maks 50).");
+        $groupId = Auth::user()->current_group_id;
+        if (!$this->checkDailyQuota((bool)$groupId)) {
+            throw new \Exception("Kuota analisis struk personal harian habis (3x).");
         }
+
+        if (!$groupId) $this->incrementUsage();
 
         // Pastikan menggunakan provider yang mendukung Vision (Gemini 1.5 Flash)
         $visionModel = env('GEMINI_MODEL', 'gemini-1.5-flash');
@@ -534,16 +648,18 @@ class AiFinancialInsight
      */
     public function parseVoiceCommand($text)
     {
-        if (!$this->checkDailyQuota()) {
-             throw new \Exception("Kuota harian AI habis.");
+        $groupId = \Illuminate\Support\Facades\Auth::user()->current_group_id;
+        if (!$this->checkDailyQuota((bool)$groupId)) {
+             throw new \Exception("Kuota harian AI personal habis.");
         }
+
+        if (!$groupId) $this->incrementUsage();
 
         $user = \Illuminate\Support\Facades\Auth::user();
         
-        // Helper to fetch categories with balances
-        $getCategoriesWithBalance = function($type) use ($user) {
-            return KategoriNamaTabungan::where('family_id', $user->family_id)
-                ->where('wallet_type', $type)
+        // Helper to fetch categories with balances (Scoped by GroupScope)
+        $getCategoriesWithBalance = function($type) {
+            return KategoriNamaTabungan::where('wallet_type', $type)
                 ->get()
                 ->map(function($cat) {
                     $totalIn = \App\Models\Tabungan::where('nama', $cat->id)->whereHas('kategoriJenis', fn($q) => $q->where('jenis', 'Pemasukan'))->sum('nominal');

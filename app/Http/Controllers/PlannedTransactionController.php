@@ -44,8 +44,11 @@ class PlannedTransactionController extends Controller
         ]);
 
         $validated['user_id'] = auth()->id();
-        $validated['family_id'] = auth()->user()->family_id;
         
+        if (auth()->user()->current_group_id) {
+            $validated['group_id'] = auth()->user()->current_group_id;
+        }
+
         PlannedTransaction::create($validated);
 
         return redirect()->route('planned-transactions.index')->with('success', 'Rencana transaksi berhasil ditambahkan.');
@@ -87,16 +90,21 @@ class PlannedTransactionController extends Controller
     {
         $request->validate(['tanggal_peristiwa' => 'required|date']);
 
-        Tabungan::create([
+        $trxData = [
             'nama' => $plannedTransaction->nama,
             'jenis' => $plannedTransaction->jenis,
             'nominal' => $plannedTransaction->nominal,
             'keterangan' => $plannedTransaction->keterangan . " (Realisasi dari rencana)",
             'user_id' => auth()->id(),
-            'family_id' => auth()->user()->family_id,
             'created_at' => $request->tanggal_peristiwa,
             'updated_at' => $request->tanggal_peristiwa,
-        ]);
+        ];
+
+        if (auth()->user()->current_group_id) {
+            $trxData['group_id'] = auth()->user()->current_group_id;
+        }
+
+        Tabungan::create($trxData);
 
         $plannedTransaction->update([
             'status' => 'done',

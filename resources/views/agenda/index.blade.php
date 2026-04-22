@@ -167,7 +167,7 @@
         <!-- Filter Area -->
         <div class="px-4 pt-4 space-y-5">
             <div x-show="!selectedDate" class="flex items-center gap-2 overflow-x-auto no-scrollbar">
-                @foreach(['all' => 'Semua', 'bills' => 'Pengingat', 'tasks' => 'Tugas'] as $key => $lbl)
+                @foreach(['all' => 'Semua', 'rituals' => 'Ritual', 'bills' => 'Pengingat', 'tasks' => 'Tugas'] as $key => $lbl)
                     <button @click="tab = '{{ $key }}'" :class="tab === '{{ $key }}' ? 'bg-slate-900 text-white shadow-md' : 'bg-white text-slate-400 border border-slate-100 shadow-sm'" 
                             class="px-4 py-2 rounded-full text-[11px] font-black transition-all whitespace-nowrap tracking-widest">{{ $lbl }}</button>
                 @endforeach
@@ -178,7 +178,8 @@
                 @php
                     $hasReminders = count($reminders) > 0;
                     $hasTasks = count($tasks) > 0;
-                    $none = !$hasReminders && !$hasTasks;
+                    $hasRituals = count($rituals) > 0;
+                    $none = !$hasReminders && !$hasTasks && !$hasRituals;
                 @endphp
 
                 @if($none)
@@ -191,6 +192,56 @@
                         <button @click="showAddModal = true" class="mt-8 px-6 py-3 bg-white border border-slate-100 rounded-2xl text-[11px] font-black text-primary shadow-sm active:scale-95 transition-all">Tambah Sekarang</button>
                     </div>
                 @endif
+
+                <!-- Rituals Section -->
+                <div x-show="(tab === 'all' || tab === 'rituals') && {{ $hasRituals ? 'true' : 'false' }}" x-transition>
+                    <div class="space-y-2">
+                        <div class="flex items-center gap-2 px-2 mb-3">
+                            <span class="material-symbols-outlined text-[18px] text-primary">auto_graph</span>
+                            <h3 class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Grup Ritualitas</h3>
+                        </div>
+                        @foreach($rituals as $ritual)
+                            <div class="agenda-card bg-slate-900 rounded-3xl p-4 border-none shadow-xl relative overflow-hidden group">
+                                <div class="absolute top-0 right-0 p-4 opacity-10">
+                                    <span class="material-symbols-outlined text-[48px] text-white">celebration</span>
+                                </div>
+                                <div class="relative z-10">
+                                    <div class="flex justify-between items-start mb-2">
+                                        <div>
+                                            <h4 class="text-[14px] font-black text-white tracking-tight">{{ $ritual->keterangan }}</h4>
+                                            <div class="flex items-center gap-1.5 mt-1">
+                                                <div class="px-2 py-0.5 bg-primary/20 text-primary rounded-lg text-[8px] font-black uppercase">Ritual</div>
+                                                <span class="text-[9px] font-bold text-slate-500">{{ $ritual->jatuh_tempo->translatedFormat('d F') }}</span>
+                                            </div>
+                                        </div>
+                                        <form action="{{ route('agenda.complete', $ritual->id) }}" method="POST">
+                                            @csrf
+                                            <input type="hidden" name="tanggal_peristiwa" value="{{ now()->format('Y-m-d') }}">
+                                            <button type="submit" class="px-4 py-2 bg-primary text-white rounded-xl text-[10px] font-black uppercase tracking-widest active:scale-95 transition-all">Selesai</button>
+                                        </form>
+                                    </div>
+                                    <div class="flex items-center gap-2 mt-4">
+                                        @if($ritual->group)
+                                            <div class="flex -space-x-2">
+                                                @foreach($ritual->group->members->take(3) as $m)
+                                                    <div class="w-6 h-6 rounded-full border-2 border-slate-900 bg-slate-800 flex items-center justify-center overflow-hidden">
+                                                        <img src="https://ui-avatars.com/api/?name={{ $m->name }}&background=random" class="w-full h-full object-cover">
+                                                    </div>
+                                                @endforeach
+                                            </div>
+                                            <p class="text-[9px] font-black text-slate-500 uppercase tracking-tighter">Shared with {{ $ritual->group->members->count() }} Anggota</p>
+                                        @else
+                                            <div class="w-6 h-6 rounded-full border-2 border-slate-900 bg-slate-800 flex items-center justify-center overflow-hidden">
+                                                <img src="https://ui-avatars.com/api/?name={{ auth()->user()->name }}&background=random" class="w-full h-full object-cover">
+                                            </div>
+                                            <p class="text-[9px] font-black text-slate-500 uppercase tracking-tighter">Pribadi</p>
+                                        @endif
+                                    </div>
+                                </div>
+                            </div>
+                        @endforeach
+                    </div>
+                </div>
 
                 <!-- Bills Section -->
                 <div x-show="(tab === 'all' || tab === 'bills') && {{ $hasReminders ? 'true' : 'false' }}" x-transition>
@@ -236,6 +287,10 @@
                                         <div class="flex items-center gap-1">
                                             <div class="w-1.5 h-1.5 rounded-full {{ $reminder->is_priority ? 'bg-red-500 animate-pulse' : 'bg-slate-200' }}"></div>
                                             <span class="text-[9px] font-bold {{ $reminder->is_priority ? 'text-red-400' : 'text-slate-300' }} uppercase tracking-widest">{{ $reminder->is_priority ? 'Penting' : 'Normal' }}</span>
+                                        </div>
+                                        <div class="w-1 h-1 rounded-full bg-slate-100 mx-0.5"></div>
+                                        <div class="px-1.5 py-0.5 rounded-md text-[8px] font-black uppercase {{ $reminder->is_group ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-50 text-slate-400 uppercase' }}">
+                                            {{ $reminder->is_group ? 'Grup' : 'Pribadi' }}
                                         </div>
                                     </div>
                                 </div>
@@ -305,6 +360,10 @@
                                                     <span class="text-[9px] font-bold {{ $task->is_priority ? 'text-red-400' : 'text-slate-300' }} tracking-tight">{{ $task->is_priority ? 'Prioritas' : 'Normal' }}</span>
                                                 </div>
                                                 <div class="w-1 h-1 rounded-full bg-slate-100"></div>
+                                                <div class="px-1.5 py-0.5 rounded-md text-[8px] font-black uppercase {{ $task->is_group ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400' }}">
+                                                    {{ $task->is_group ? 'Grup' : 'Pribadi' }}
+                                                </div>
+                                                <div class="w-1 h-1 rounded-full bg-slate-100"></div>
                                                 <p class="text-[9px] font-black text-slate-300 uppercase tracking-tight">{{ \Carbon\Carbon::parse($task->jatuh_tempo)->format('d M') }}</p>
                                                 <template x-if="timeline.length > 0">
                                                     <span class="material-symbols-outlined text-[14px] text-slate-200 transition-transform" :class="showTimeline ? 'rotate-180' : ''">expand_more</span>
@@ -341,18 +400,78 @@
                     </div>
                 </div>
 
-                <!-- Floating Edit Actions -->
-                <div x-show="editMode && selectedIds.length > 0" x-transition:enter="transition ease-out duration-300 transform" x-transition:enter-start="translate-y-20" x-transition:enter-end="translate-y-0"
-                     class="fixed bottom-24 left-1/2 -translate-x-1/2 z-[80] w-[90%] max-w-sm">
-                    <div class="bg-slate-900 rounded-2xl p-3 shadow-2xl flex items-center justify-between border border-slate-800">
-                        <div class="pl-2">
-                             <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest"><span x-text="selectedIds.length"></span> Item Terpilih</p>
+                <!-- AI Smart Hub (Floating) -->
+                <div x-data="{ 
+                        aiMessage: '', 
+                        aiData: null,
+                        loading: false, 
+                        async checkIn() { 
+                            this.loading = true; 
+                            this.aiMessage = '';
+                            this.aiData = null;
+                            try {
+                                const resp = await fetch('{{ route('agenda.ai-check-in') }}', {
+                                    method: 'POST',
+                                    headers: { 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' }
+                                });
+                                const data = await resp.json();
+                                let msg = data.message;
+                                
+                                // Parse [DATA_CARD] if exists
+                                if (msg.includes('[DATA_CARD]')) {
+                                    let parts = msg.split('[DATA_CARD]');
+                                    msg = parts.filter(p => !p.trim().startsWith('{')).join(' ').trim();
+                                    let jsonPart = parts.find(p => p.trim().startsWith('{'));
+                                    if (jsonPart) {
+                                        try { this.aiData = JSON.parse(jsonPart.trim()); } catch(e) {}
+                                    }
+                                }
+                                this.aiMessage = msg;
+                            } catch(e) { this.aiMessage = 'Gagal terhubung dengan Famly AI.'; }
+                            this.loading = false;
+                        } 
+                    }" 
+                    class="fixed bottom-32 right-6 z-[80]">
+                    <template x-if="aiMessage || aiData">
+                        <div x-transition class="absolute bottom-full right-0 mb-4 w-72 bg-white p-5 rounded-[2.5rem] shadow-2xl border border-emerald-100 flex flex-col gap-3">
+                             <div class="flex items-center justify-between mb-1">
+                                 <div class="flex items-center gap-2">
+                                     <div class="w-7 h-7 rounded-full bg-emerald-500 flex items-center justify-center text-white">
+                                         <span class="material-symbols-outlined text-[16px]">smart_toy</span>
+                                     </div>
+                                     <span class="text-[10px] font-black text-slate-800 uppercase tracking-widest leading-none">Smart Advisor</span>
+                                 </div>
+                                 <button @click="aiMessage = ''; aiData = null" class="text-slate-300 hover:text-slate-400"><span class="material-symbols-outlined text-[18px]">close</span></button>
+                             </div>
+
+                             <template x-if="aiData">
+                                 <div class="bg-slate-50 p-4 rounded-2xl border border-slate-100 mb-1">
+                                     <h4 class="text-[11px] font-black text-slate-900 uppercase tracking-tighter mb-2" x-text="aiData.title"></h4>
+                                     <div class="space-y-2">
+                                         <template x-for="item in aiData.items">
+                                             <div class="flex justify-between items-center text-[11px] font-bold">
+                                                 <span class="text-slate-400" x-text="item.label"></span>
+                                                 <span class="text-emerald-600" x-text="item.value"></span>
+                                             </div>
+                                         </template>
+                                     </div>
+                                     <div x-show="aiData.footer" class="mt-3 pt-2 border-t border-slate-100 text-[10px] font-black text-slate-300 italic text-right" x-text="aiData.footer"></div>
+                                 </div>
+                             </template>
+                             
+                             <p class="text-[13px] font-bold text-slate-700 leading-snug px-1" x-text="aiMessage"></p>
+                             
+                             <div class="mt-2 flex justify-end">
+                                 <button @click="aiMessage = ''; aiData = null" class="px-4 py-2 bg-emerald-50 text-emerald-600 rounded-xl text-[10px] font-black uppercase tracking-widest active:scale-95 transition-all">Oke, Paham</button>
+                             </div>
                         </div>
-                        <div class="flex items-center gap-2">
-                            <button @click="selectedIds = []" class="px-3 py-1.5 rounded-xl text-[10px] font-black text-slate-400 hover:text-white uppercase transition-colors">Batal</button>
-                            <button @click="bulkDelete()" class="px-4 py-1.5 bg-red-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-red-500/20 active:scale-95 transition-all">Hapus</button>
-                        </div>
-                    </div>
+                    </template>
+                    <button @click="checkIn()" 
+                            :disabled="loading"
+                            class="w-14 h-14 rounded-[2rem] bg-slate-900 text-white shadow-2xl flex items-center justify-center border border-slate-800 active:scale-95 transition-all group overflow-hidden">
+                        <span x-show="!loading" class="material-symbols-outlined text-[28px] text-primary group-hover:rotate-12 transition-transform">auto_awesome</span>
+                        <div x-show="loading" class="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+                    </button>
                 </div>
             </div>
         </div>
@@ -386,10 +505,24 @@
 
                 <!-- Animated Sliding Toggle -->
                 <div class="relative flex p-1 bg-slate-100 rounded-2xl mb-4 overflow-hidden h-10">
-                    <div class="absolute inset-1 w-[calc(50%-4px)] bg-white rounded-xl shadow-sm transition-all duration-500 ease-out"
-                         :style="agendaType === 'reminder' ? 'transform: translateX(100%)' : 'transform: translateX(0)'"></div>
+                    <div class="absolute inset-1 w-[calc(33.33%-4px)] bg-white rounded-xl shadow-sm transition-all duration-500 ease-out"
+                         :style="agendaType === 'reminder' ? 'transform: translateX(100%)' : (agendaType === 'ritual' ? 'transform: translateX(200%)' : 'transform: translateX(0)')"></div>
                     <button type="button" @click="agendaType = 'task'" class="relative flex-1 z-10 flex items-center justify-center gap-1.5 text-[9px] font-black transition-all" :class="agendaType === 'task' ? 'text-primary' : 'text-slate-400'">Tugas</button>
                     <button type="button" @click="agendaType = 'reminder'" class="relative flex-1 z-10 flex items-center justify-center gap-1.5 text-[9px] font-black transition-all" :class="agendaType === 'reminder' ? 'text-primary' : 'text-slate-400'">Pengingat</button>
+                    <button type="button" @click="agendaType = 'ritual'" class="relative flex-1 z-10 flex items-center justify-center gap-1.5 text-[9px] font-black transition-all" :class="agendaType === 'ritual' ? 'text-primary' : 'text-slate-400'">Ritual</button>
+                </div>
+
+                <div x-show="{{ auth()->user()->current_group_id ? 'true' : 'false' }}" class="mb-4">
+                    <div class="flex items-center justify-between p-3 bg-slate-50 rounded-2xl border border-slate-100">
+                        <div class="flex items-center gap-2">
+                             <span class="material-symbols-outlined text-[18px] text-slate-400">group</span>
+                             <p class="text-[10px] font-bold text-slate-600 uppercase tracking-widest">Bagikan ke Grup?</p>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" name="is_group" value="1" class="sr-only peer" checked>
+                            <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+                        </label>
+                    </div>
                 </div>
 
                 <form x-ref="agendaForm" action="{{ route('agenda.store') }}" method="POST" class="space-y-4">

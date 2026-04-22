@@ -11,10 +11,10 @@
         
         // Fetch real Wallets for Balance Integration
         $user = Auth::user();
-        $allWallets = \App\Models\KategoriNamaTabungan::where('family_id', $user->family_id)->get();
+        $allWallets = \App\Models\KategoriNamaTabungan::all();
         $totalBalance = $allWallets->where('wallet_type', 'wallet')->sum('balance');
 
-        $walletList = \App\Models\KategoriNamaTabungan::where('family_id', $user->family_id)->where('wallet_type', 'wallet')->get();
+        $walletList = \App\Models\KategoriNamaTabungan::where('wallet_type', 'wallet')->get();
     @endphp
 
     <div class="bg-[#F8FAFC] min-h-screen font-jakarta" 
@@ -50,7 +50,7 @@
             }
          }">
         
-        <form method="POST" action="{{ route('transactions.store') }}">
+        <form method="POST" action="{{ route('transaction.store') }}">
             @csrf
         
         <!-- UI Tabs (Moved inside Main for cleaner look without header) -->

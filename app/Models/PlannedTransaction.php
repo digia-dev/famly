@@ -11,7 +11,7 @@ class PlannedTransaction extends Model
 
     protected static function booted(): void
     {
-        static::addGlobalScope(new \App\Models\Scopes\FamilyScope);
+        static::addGlobalScope(new \App\Models\Scopes\GroupScope);
     }
 
     /**
@@ -30,12 +30,14 @@ class PlannedTransaction extends Model
         'is_priority',
         'timeline_data',
         'user_id',
-        'family_id',
+        'group_id',
+        'is_group',
+        'activity_type',
     ];
 
-    public function family()
+    public function group()
     {
-        return $this->belongsTo(Family::class);
+        return $this->belongsTo(Group::class, 'group_id');
     }
 
     /**

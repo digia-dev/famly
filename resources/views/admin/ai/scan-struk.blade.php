@@ -86,11 +86,27 @@
                     <div class="w-10 h-1 bg-slate-200 rounded-full mx-auto my-3 shrink-0"></div>
                     
                     <div class="px-5 shrink-0 mb-4">
-                        <div class="flex items-center justify-between">
+                        <div class="flex items-center justify-between mb-4">
                             <h3 class="text-[20px] font-bold tracking-tight text-slate-900 leading-none">Catat Transaksi</h3>
                             <div class="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-500 flex items-center justify-center">
                                  <span class="material-symbols-outlined text-[20px]" style="font-variation-settings: 'FILL' 1">auto_awesome</span>
                             </div>
+                        </div>
+
+                        <!-- Context Toggle (Personal vs Groups) -->
+                        <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1">
+                            <button @click="switchContext('personal')" 
+                                    :class="selectedContext === 'personal' ? 'bg-primary text-white shadow-md' : 'bg-white text-slate-400 border border-slate-100'"
+                                    class="px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap active:scale-95">
+                                Pribadi
+                            </button>
+                            @foreach(Auth::user()->groups as $group)
+                            <button @click="switchContext('{{ $group->id }}')" 
+                                    :class="selectedContext == '{{ $group->id }}' ? 'bg-amber-500 text-white shadow-md' : 'bg-white text-slate-400 border border-slate-100'"
+                                    class="px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap active:scale-95">
+                                {{ $group->name }}
+                            </button>
+                            @endforeach
                         </div>
                     </div>
 
@@ -199,18 +215,41 @@
         return {
             wallets, posItems, savings,
             stream: null, flashOn: false, processing: false, saving: false, result: null, cameraReady: false, walletType: 'pos',
+            selectedContext: '{{ Auth::user()->current_group_id ?: "personal" }}',
             statusText: '', statusDetail: '', notification: { show: false, type: 'success', title: '', message: '' },
             init() { setTimeout(() => this.startCamera(), 300); },
             
             currentItems() {
-                if (this.walletType === 'pos') return this.posItems;
-                return this.wallets;
+                let items = [];
+                if (this.walletType === 'pos') items = this.posItems;
+                else items = this.wallets;
+
+                // Filter by selected context
+                if (this.selectedContext === 'personal') {
+                    return items.filter(i => !i.group_id);
+                } else {
+                    return items.filter(i => i.group_id == this.selectedContext);
+                }
             },
 
             toggleWalletType() {
                 this.walletType = (this.walletType === 'pos') ? 'wallet' : 'pos';
                 const targetList = this.currentItems();
-                if (targetList.length) { this.result.walletId = targetList[0].id; }
+                if (targetList.length) { 
+                    this.result.walletId = targetList[0].id;
+                } else {
+                    this.result.walletId = null;
+                }
+            },
+
+            switchContext(newContext) {
+                this.selectedContext = newContext;
+                const targetList = this.currentItems();
+                if (targetList.length) {
+                    this.result.walletId = targetList[0].id;
+                } else {
+                    this.result.walletId = null;
+                }
             },
 
             notify(type, title, message) {
@@ -285,7 +324,10 @@
                     const response = await fetch('{{ route("ai.save-transaction") }}', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}' },
-                        body: JSON.stringify(this.result)
+                        body: JSON.stringify({
+                            ...this.result,
+                            group_id: this.selectedContext
+                        })
                     });
                     const data = await response.json();
                     if (data.success) { window.location.href = '{{ route("admin.dashboard") }}?success_ai=1'; }

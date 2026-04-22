@@ -28,21 +28,41 @@ class DiscoveryController extends Controller
     public function getItems()
     {
         $userId = Auth::id();
-        $cacheKey = 'discovery_items_' . $userId;
+        $cacheKey = 'discovery_items_v2_' . $userId;
 
         // Use cache to avoid slow AI API calls on every page load
         return cache()->remember($cacheKey, 60 * 6, function () { // 6 hours
+            $finalItems = [];
+            
             try {
-                $aiItems = app(\App\Services\AiFinancialInsight::class)->getDiscoveryInsights();
-                if (is_array($aiItems) && count($aiItems) > 3) {
-                    return array_slice($aiItems, 0, 3);
+                $aiService = app(\App\Services\AiFinancialInsight::class);
+                
+                // 1. Check for Anomalies first (High Priority)
+                $anomaly = $aiService->detectAnomalies();
+                if ($anomaly) {
+                    $finalItems[] = [
+                        'category' => 'Anomali Terdeteksi',
+                        'title' => 'Lonjakan Pengeluaran!',
+                        'description' => $anomaly,
+                        'action_label' => 'Cek Transaksi',
+                        'action_url' => route('management.index'),
+                        'bg' => 'bg-emerald-700',
+                        'text' => 'text-white'
+                    ];
                 }
+
+                // 2. Get standard AI insights
+                $aiInsights = $aiService->getDiscoveryInsights();
+                if (is_array($aiInsights)) {
+                    $finalItems = array_merge($finalItems, $aiInsights);
+                }
+
             } catch (\Exception $e) {
                 Log::error("Discovery AI failed: " . $e->getMessage());
             }
 
-            // Fallback to high-quality static items if AI fails or hasn't loaded
-            return [
+            // Fill with default items if we have less than 3
+            $fallbacks = [
                 [
                     'category' => 'Kesimpulan AI',
                     'title' => 'Arus kasmu sehat hari ini!',
@@ -67,10 +87,17 @@ class DiscoveryController extends Controller
                     'description' => 'Kini kamu bisa terima otomatis ringkasan pengeluaran setiap Senin pagi.',
                     'action_label' => 'Coba Sekarang',
                     'action_url' => route('profile.edit'),
-                    'bg' => 'bg-slate-900',
+                    'bg' => 'bg-amber-600',
                     'text' => 'text-white'
                 ]
             ];
+
+            foreach ($fallbacks as $fb) {
+                if (count($finalItems) >= 3) break;
+                $finalItems[] = $fb;
+            }
+
+            return array_slice($finalItems, 0, 3);
         });
     }
 
@@ -97,8 +124,11 @@ class DiscoveryController extends Controller
         $tabunganAi = Tabungan::whereHas('kategoriJenis', fn($q) => $q->where('jenis', 'Pemasukan'))->where('created_at', '>=', now()->startOfMonth())->sum('nominal');
         
         $wallets = KategoriNamaTabungan::all();
+        $recentTransactions = Tabungan::with('kategoriNama')->orderBy('created_at', 'desc')->limit(15)->get();
+        $activeGroup = Auth::user()->currentGroup;
+        $userGroups = Auth::user()->groups;
         
-        return view('ai.index', compact('statusAnggaran', 'tabunganAi', 'wallets'));
+        return view('ai.index', compact('statusAnggaran', 'tabunganAi', 'wallets', 'recentTransactions', 'activeGroup', 'userGroups'));
     }
 
     /**
@@ -107,10 +137,35 @@ class DiscoveryController extends Controller
     public function processAI(Request $request)
     {
         $request->validate(['message' => 'required|string']);
+        $user = auth()->user();
+
+        // Freemium Check: Usage Limit for Trial Users
+        if (!$user->isPremium()) {
+            if ($user->ai_usage_count >= 3) {
+                return response()->json([
+                    'success' => true,
+                    'response' => "Jatah tanya AI Anda hari ini sudah habis (Maks 3x). **Upgrade ke Premium** hanya Rp 19.900/bulan untuk akses tanpa batas, laporan lengkap, dan fitur eksklusif lainnya!"
+                ]);
+            }
+        }
+
+        // Restriction: Only Admin can use @Fams
+        if (str_contains($request->message, '@Fams')) {
+            $group = \App\Models\Group::find($user->current_group_id);
+            if (!$group || !$group->isAdmin($user->id)) {
+                return response()->json([
+                    'success' => true,
+                    'response' => "Maaf {$user->name}, tag **@Fams** khusus digunakan oleh **Admin Grup** untuk analisis finansial kolektif. Silakan hubungi admin Anda atau upgrade peran Anda untuk menggunakan fitur AI ini."
+                ]);
+            }
+        }
         
         try {
             $aiService = new AiFinancialInsight();
             $response = $aiService->chat($request->message);
+            
+            // Increment Usage Count
+            $user->increment('ai_usage_count');
             
             return response()->json([
                 'success' => true,
@@ -130,15 +185,25 @@ class DiscoveryController extends Controller
     public function aiScan()
     {
         $user = Auth::user();
-        $familyId = $user->family_id;
+        
+        // Fetch ALL categories the user is entitled to (Personal + Their Groups)
+        // We bypass GroupScope to allow context switching within the UI
+        $allCategories = KategoriNamaTabungan::withoutGlobalScope(\App\Models\Scopes\GroupScope::class)
+            ->where(function($q) use ($user) {
+                // Personal wallets
+                $q->where(function($sq) use ($user) {
+                    $sq->whereNull('group_id')->where('user_id', $user->id);
+                })
+                // Group wallets
+                ->orWhereIn('group_id', $user->groups->pluck('id'));
+            })
+            ->get();
 
-        // Optimized balance fetching with a single query
-        $allCategories = KategoriNamaTabungan::where('family_id', $familyId)->get();
         $categoryIds = $allCategories->pluck('id')->toArray();
 
-        $stats = Tabungan::query()
+        // Fetch balances for these categories
+        $stats = Tabungan::withoutGlobalScope(\App\Models\Scopes\GroupScope::class)
             ->join('kategori_jenis_tabungans', 'tabungans.jenis', '=', 'kategori_jenis_tabungans.id')
-            ->where('tabungans.family_id', $familyId)
             ->whereIn('tabungans.nama', $categoryIds)
             ->select('tabungans.nama as category_id', \DB::raw("
                 SUM(CASE WHEN kategori_jenis_tabungans.jenis = 'Pemasukan' THEN tabungans.nominal ELSE 0 END) -
@@ -150,11 +215,13 @@ class DiscoveryController extends Controller
 
         $allCategories->each(function($cat) use ($stats) {
             $cat->balance = $stats->get($cat->id)->balance ?? 0;
+            // Add a friendly context name for the UI
+            $cat->context_name = $cat->group_id ? ($cat->group->name ?? 'Grup') : 'Pribadi';
         });
 
-        $wallets = $allCategories->where('wallet_type', 'wallet');
-        $posItems = $allCategories->where('wallet_type', 'pos');
-        $savings = $allCategories->where('wallet_type', 'savings');
+        $wallets = $allCategories->where('wallet_type', 'wallet')->values();
+        $posItems = $allCategories->where('wallet_type', 'pos')->values();
+        $savings = $allCategories->where('wallet_type', 'savings')->values();
 
         return view('admin.ai.scan-struk', compact('wallets', 'posItems', 'savings'));
     }
@@ -165,15 +232,20 @@ class DiscoveryController extends Controller
     public function aiVoice()
     {
         $user = Auth::user();
-        $familyId = $user->family_id;
+        
+        $allCategories = KategoriNamaTabungan::withoutGlobalScope(\App\Models\Scopes\GroupScope::class)
+            ->where(function($q) use ($user) {
+                $q->where(function($sq) use ($user) {
+                    $sq->whereNull('group_id')->where('user_id', $user->id);
+                })
+                ->orWhereIn('group_id', $user->groups->pluck('id'));
+            })
+            ->get();
 
-        // Reuse the same optimized logic
-        $allCategories = KategoriNamaTabungan::where('family_id', $familyId)->get();
         $categoryIds = $allCategories->pluck('id')->toArray();
 
-        $stats = Tabungan::query()
+        $stats = Tabungan::withoutGlobalScope(\App\Models\Scopes\GroupScope::class)
             ->join('kategori_jenis_tabungans', 'tabungans.jenis', '=', 'kategori_jenis_tabungans.id')
-            ->where('tabungans.family_id', $familyId)
             ->whereIn('tabungans.nama', $categoryIds)
             ->select('tabungans.nama as category_id', \DB::raw("
                 SUM(CASE WHEN kategori_jenis_tabungans.jenis = 'Pemasukan' THEN tabungans.nominal ELSE 0 END) -
@@ -185,11 +257,12 @@ class DiscoveryController extends Controller
 
         $allCategories->each(function($cat) use ($stats) {
             $cat->balance = $stats->get($cat->id)->balance ?? 0;
+            $cat->context_name = $cat->group_id ? ($cat->group->name ?? 'Grup') : 'Pribadi';
         });
 
-        $wallets = $allCategories->where('wallet_type', 'wallet');
-        $posItems = $allCategories->where('wallet_type', 'pos');
-        $savings = $allCategories->where('wallet_type', 'savings');
+        $wallets = $allCategories->where('wallet_type', 'wallet')->values();
+        $posItems = $allCategories->where('wallet_type', 'pos')->values();
+        $savings = $allCategories->where('wallet_type', 'savings')->values();
 
         return view('admin.ai.voice-record', compact('wallets', 'posItems', 'savings'));
     }
@@ -301,7 +374,7 @@ class DiscoveryController extends Controller
                 'nominal' => $request->total,
                 'keterangan' => $label,
                 'user_id' => Auth::id(),
-                'family_id' => Auth::user()->family_id,
+                'group_id' => ($request->group_id && $request->group_id !== 'personal') ? $request->group_id : null,
                 'status' => 'success',
                 'metadata_ai' => [
                     'merchant' => $request->merchant,
@@ -312,12 +385,106 @@ class DiscoveryController extends Controller
             ]);
 
             return response()->json([
-                'success' => true,
-                'message' => 'Berhasil disimpan!',
-                'data' => $tabungan
+                'success' => true, 
+                'message' => 'Transaksi berhasil dicatat ke ' . $category->nama . '!',
+                'tabungan' => $tabungan
             ]);
         } catch (\Exception $e) {
-            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
         }
+    }
+
+    /**
+     * Unified Global Search (Instant Results)
+     */
+    public function search(Request $request)
+    {
+        $q = $request->get('q');
+        if (!$q || strlen($q) < 2) return response()->json(['results' => []]);
+
+        $user = auth()->user();
+        $results = collect();
+
+        // 1. Groups & Wallets (Managed by GroupScope)
+        $wallets = KategoriNamaTabungan::where('nama', 'LIKE', "%{$q}%")
+            ->take(3)
+            ->get()
+            ->map(fn($w) => [
+                'type' => 'wallet',
+                'title' => $w->nama,
+                'subtitle' => 'Dompet / Pos Keuangan',
+                'icon' => $w->icon ?? 'account_balance_wallet',
+                'url' => route('management.index', ['id' => $w->id])
+            ]);
+        $results = $results->concat($wallets);
+
+        // 2. Transactions (Managed by GroupScope)
+        $transactions = Tabungan::where('keterangan', 'LIKE', "%{$q}%")
+            ->with('kategoriNama')
+            ->orderBy('created_at', 'desc')
+            ->take(5)
+            ->get()
+            ->map(fn($t) => [
+                'type' => 'transaction',
+                'title' => $t->keterangan,
+                'subtitle' => 'Transaksi ' . ($t->kategoriNama->nama ?? ''),
+                'icon' => 'receipt_long',
+                'url' => route('management.index') // Deep link logic could be improved
+            ]);
+        $results = $results->concat($transactions);
+
+        // 3. Agenda & Rituals (Managed by GroupScope)
+        $agenda = PlannedTransaction::where('keterangan', 'LIKE', "%{$q}%")
+            ->orWhere('nama', 'LIKE', "%{$q}%")
+            ->take(3)
+            ->get()
+            ->map(fn($a) => [
+                'type' => 'agenda',
+                'title' => $a->keterangan ?? $a->nama,
+                'subtitle' => 'Agenda ' . ucfirst($a->activity_type),
+                'icon' => 'event',
+                'url' => route('agenda.index')
+            ]);
+        $results = $results->concat($agenda);
+
+        // 4. Group Members
+        if ($user->current_group_id) {
+            $members = User::whereHas('groups', fn($query) => $query->where('group_id', $user->current_group_id))
+                ->where('name', 'LIKE', "%{$q}%")
+                ->take(3)
+                ->get()
+                ->map(fn($m) => [
+                    'type' => 'user',
+                    'title' => $m->name,
+                    'subtitle' => 'Anggota Keluarga',
+                    'icon' => 'group',
+                    'url' => '#'
+                ]);
+            $results = $results->concat($members);
+        }
+
+        return response()->json(['results' => $results]);
+    }
+
+    /**
+     * Get Search Suggestions & History
+     */
+    public function suggestions()
+    {
+        $user = auth()->user();
+
+        // Popular/Recent Context items
+        $popular = KategoriNamaTabungan::take(4)->get();
+        
+        // Mock history if empty
+        $history = \App\Models\SearchHistory::where('user_id', $user->id)
+            ->orderBy('created_at', 'desc')
+            ->take(5)
+            ->get();
+
+        return response()->json([
+            'popular' => $popular,
+            'history' => $history
+        ]);
     }
 }

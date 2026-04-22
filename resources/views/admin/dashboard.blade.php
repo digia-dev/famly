@@ -53,11 +53,30 @@
                 </div>
             </div>
         @endif
+        
+        @if(session('quick_insight'))
+            <div x-data="{ show: true }" x-show="show" x-init="setTimeout(() => show = false, 8000)"
+                 class="mb-2 p-3 bg-white/95 backdrop-blur-xl rounded-[28px] shadow-xl shadow-slate-200/50 flex items-center justify-between border border-emerald-50">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-2xl bg-emerald-500 flex items-center justify-center text-white shadow-lg shadow-emerald-500/20">
+                        <span class="material-symbols-outlined text-[20px]" style="font-variation-settings: 'FILL' 1;">auto_awesome</span>
+                    </div>
+                    <div>
+                        <p class="text-[10px] font-black text-emerald-600 uppercase tracking-widest leading-none mb-1">Quick Insight @Fams</p>
+                        <p class="text-[12px] font-extrabold text-slate-800 tracking-tight leading-tight">{{ session('quick_insight') }}</p>
+                    </div>
+                </div>
+                <button @click="show = false" class="text-slate-300 hover:text-slate-500 p-1">
+                    <span class="material-symbols-outlined text-sm">close</span>
+                </button>
+            </div>
+        @endif
 
         <!-- Balance Card -->
         <div class="relative">
             @include('admin.partials.gojek-header')
         </div>
+
 
         <!-- Interactive Hub (Daily Rituals & Mini Agenda) -->
         @include('admin.partials.interactive-hub')
@@ -68,7 +87,6 @@
                 @php
                     $links = [
                         ['icon' => 'add_card', 'label' => 'Catat', 'url' => route('transaction.create'), 'color' => 'emerald'],
-                        ['icon' => 'insights', 'label' => 'Analisa', 'url' => route('reports.analysis'), 'color' => 'blue'],
                         ['icon' => 'account_balance_wallet', 'label' => 'Dompet', 'url' => route('management.index'), 'color' => 'amber'],
                         ['icon' => 'calendar_month', 'label' => 'Agenda', 'url' => route('agenda.index'), 'color' => 'rose'],
                         ['icon' => 'notifications', 'label' => 'Pesan', 'url' => route('notification.index'), 'color' => 'indigo'],
@@ -85,7 +103,7 @@
                 
                 <!-- Add Shortcut Button -->
                 <button class="flex flex-col items-center gap-1 group active:scale-[0.9] transition-all flex-shrink-0 w-16">
-                    <div class="w-10 h-10 bg-slate-50 text-slate-400 rounded-xl flex items-center justify-center border border-dashed border-slate-200">
+                    <div class="w-10 h-10 bg-slate-50 text-slate-400 rounded-xl flex items-center justify-center border border-dashed border-slate-100">
                         <span class="material-symbols-outlined text-[18px]">add</span>
                     </div>
                     <span class="text-[9px] font-bold text-slate-400 tracking-tighter text-center leading-none">Tambah</span>

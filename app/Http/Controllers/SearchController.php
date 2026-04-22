@@ -49,6 +49,7 @@ class SearchController extends Controller
             return response()->json(['results' => []]);
         }
 
+        $user = Auth::user();
         $results = [];
 
         // ==========================================
@@ -61,7 +62,21 @@ class SearchController extends Controller
             }
         }
 
-        // 2. Search Transactions
+        // 2. Search Wallets
+        $wallets = KategoriNamaTabungan::where('nama', 'like', "%{$q}%")
+            ->take(3)
+            ->get();
+        foreach ($wallets as $w) {
+            $results[] = [
+                'type' => 'wallet',
+                'title' => $w->nama,
+                'subtitle' => 'Dompet / Pos Keuangan',
+                'icon' => $w->icon ?: 'account_balance_wallet',
+                'url' => route('management.index', ['id' => $w->id])
+            ];
+        }
+
+        // 3. Search Transactions (Scoped by GroupScope)
         $transactions = Tabungan::where('keterangan', 'like', "%{$q}%")
             ->with(['user', 'kategoriNama'])
             ->latest()
@@ -72,23 +87,41 @@ class SearchController extends Controller
                 'type' => 'transaction',
                 'title' => $t->keterangan ?: 'Transaksi Tanpa Nama',
                 'subtitle' => 'Rp ' . number_format($t->nominal, 0, ',', '.') . ' • ' . ($t->user->name ?? 'User'),
-                'icon' => $t->kategoriNama->icon ?? 'payments',
+                'icon' => $t->kategoriNama->icon ?? 'receipt_long',
                 'url' => route('management.index')
             ];
         }
 
-        // 3. Search Users
-        $users = User::where('name', 'like', "%{$q}%")
+        // 4. Search Agenda & Rituals
+        $agendas = \App\Models\PlannedTransaction::where('keterangan', 'like', "%{$q}%")
+            ->orWhere('nama', 'like', "%{$q}%")
             ->take(3)
             ->get();
-        foreach ($users as $u) {
+        foreach ($agendas as $a) {
             $results[] = [
-                'type' => 'user',
-                'title' => $u->name,
-                'subtitle' => $u->email,
-                'icon' => 'person',
-                'url' => route('profile.edit')
+                'type' => 'agenda',
+                'title' => $a->keterangan ?: $a->nama,
+                'subtitle' => 'Agenda ' . ucfirst($a->activity_type),
+                'icon' => $a->activity_type === 'ritual' ? 'celebration' : 'event',
+                'url' => route('agenda.index')
             ];
+        }
+
+        // 5. Search Group Members
+        if ($user->current_group_id) {
+            $members = User::whereHas('groups', fn($query) => $query->where('group_id', $user->current_group_id))
+                ->where('name', 'like', "%{$q}%")
+                ->take(3)
+                ->get();
+            foreach ($members as $u) {
+                $results[] = [
+                    'type' => 'user',
+                    'title' => $u->name,
+                    'subtitle' => 'Anggota Keluarga',
+                    'icon' => 'group',
+                    'url' => '#'
+                ];
+            }
         }
 
         return response()->json(['results' => $results]);

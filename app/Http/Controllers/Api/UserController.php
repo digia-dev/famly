@@ -23,7 +23,7 @@ class UserController extends ApiController
             'email' => 'required|string|email|max:255|unique:users',
             'password' => 'required|string|min:8',
             'role' => 'nullable|string',
-            'family_id' => 'nullable|exists:families,id',
+            'group_id' => 'nullable|exists:groups,id',
         ]);
 
         if ($validator->fails()) {
@@ -35,7 +35,7 @@ class UserController extends ApiController
             'email' => $request->email,
             'password' => Hash::make($request->password),
             'role' => $request->role ?? 'viewer',
-            'family_id' => $request->family_id,
+            'group_id' => $request->group_id,
         ]);
 
         \App\Models\ActivityLog::create([
@@ -52,7 +52,7 @@ class UserController extends ApiController
 
     public function show($id)
     {
-        $user = User::with('family')->find($id);
+        $user = User::with('currentGroup')->find($id);
         if (!$user) {
             return $this->error('User not found', 444);
         }
@@ -70,7 +70,7 @@ class UserController extends ApiController
             'name' => 'string|max:255',
             'email' => 'string|email|max:255|unique:users,email,'.$id,
             'role' => 'string',
-            'family_id' => 'nullable|exists:families,id',
+            'group_id' => 'nullable|exists:groups,id',
         ]);
 
         if ($validator->fails()) {

@@ -136,6 +136,22 @@
                         </div>
                     </div>
 
+                    <!-- Context Toggle (Personal vs Groups) -->
+                    <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1">
+                        <button @click="switchContext('personal')" 
+                                :class="selectedContext === 'personal' ? 'bg-primary text-white shadow-md' : 'bg-slate-50 text-slate-400 border border-slate-100'"
+                                class="px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest transition-all whitespace-nowrap active:scale-95">
+                            Pribadi
+                        </button>
+                        @foreach(Auth::user()->groups as $group)
+                        <button @click="switchContext('{{ $group->id }}')" 
+                                :class="selectedContext == '{{ $group->id }}' ? 'bg-amber-500 text-white shadow-md' : 'bg-slate-50 text-slate-400 border border-slate-100'"
+                                class="px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest transition-all whitespace-nowrap active:scale-95">
+                            {{ $group->name }}
+                        </button>
+                        @endforeach
+                    </div>
+
                     <!-- Enhanced Selection Area -->
                     <div class="space-y-3">
                         <!-- Segmented Control -->
@@ -154,53 +170,29 @@
 
                         <!-- Scrollable Selection Grid -->
                         <div class="space-y-2 max-h-[160px] overflow-y-auto no-scrollbar pr-1">
-                            <!-- Pos List -->
-                            <template x-if="activeTab === 'pos'">
-                                <div class="grid grid-cols-1 gap-2">
-                                    @foreach($posItems as $pos)
-                                        <button @click="selectedWallet = '{{ $pos->nama }}'" 
-                                                class="flex items-center justify-between p-3 rounded-xl border transition-all text-left group"
-                                                :class="selectedWallet === '{{ $pos->nama }}' ? 'bg-emerald-50 border-primary' : 'bg-white border-slate-100'">
-                                            <div class="flex items-center gap-2.5">
-                                                <div class="w-7 h-7 rounded-lg flex items-center justify-center transition-colors"
-                                                     :class="selectedWallet === '{{ $pos->nama }}' ? 'bg-primary text-white' : 'bg-slate-50 text-slate-400'">
-                                                    <span class="material-symbols-outlined text-[16px]">account_balance_wallet</span>
-                                                </div>
-                                                <div>
-                                                    <p class="text-[11px] font-bold text-slate-700 leading-none">{{ $pos->nama }}</p>
-                                                    <p class="text-[9px] font-medium text-slate-400 mt-1">Saldo: Rp {{ number_format($pos->balance, 0, ',', '.') }}</p>
-                                                </div>
-                                            </div>
-                                            <div x-show="selectedWallet === '{{ $pos->nama }}'" class="text-primary">
-                                                <span class="material-symbols-outlined text-[18px]">check_circle</span>
-                                            </div>
-                                        </button>
-                                    @endforeach
-                                </div>
+                            <template x-for="item in filteredItems()" :key="item.id">
+                                <button @click="selectedWallet = item.nama; selectedWalletId = item.id" 
+                                        class="w-full flex items-center justify-between p-3 rounded-xl border transition-all text-left group"
+                                        :class="selectedWallet === item.nama ? 'bg-emerald-50 border-primary' : 'bg-white border-slate-100'">
+                                    <div class="flex items-center gap-2.5">
+                                        <div class="w-7 h-7 rounded-lg flex items-center justify-center transition-colors"
+                                             :class="selectedWallet === item.nama ? 'bg-primary text-white' : 'bg-slate-50 text-slate-400'">
+                                            <span class="material-symbols-outlined text-[16px]" x-text="activeTab === 'pos' ? 'account_balance_wallet' : 'payments'"></span>
+                                        </div>
+                                        <div>
+                                            <p class="text-[11px] font-bold text-slate-700 leading-none" x-text="item.nama"></p>
+                                            <p class="text-[9px] font-medium text-slate-400 mt-1" x-text="'Saldo: Rp ' + Number(item.balance || 0).toLocaleString('id-ID')"></p>
+                                        </div>
+                                    </div>
+                                    <div x-show="selectedWallet === item.nama" class="text-primary">
+                                        <span class="material-symbols-outlined text-[18px]">check_circle</span>
+                                    </div>
+                                </button>
                             </template>
-
-                            <!-- Wallet List -->
-                            <template x-if="activeTab === 'wallet'">
-                                <div class="grid grid-cols-1 gap-2">
-                                    @foreach($wallets as $wallet)
-                                        <button @click="selectedWallet = '{{ $wallet->nama }}'" 
-                                                class="flex items-center justify-between p-3 rounded-xl border transition-all text-left group"
-                                                :class="selectedWallet === '{{ $wallet->nama }}' ? 'bg-emerald-50 border-primary' : 'bg-white border-slate-100'">
-                                            <div class="flex items-center gap-2.5">
-                                                <div class="w-7 h-7 rounded-lg flex items-center justify-center transition-colors"
-                                                     :class="selectedWallet === '{{ $wallet->nama }}' ? 'bg-primary text-white' : 'bg-slate-50 text-slate-400'">
-                                                    <span class="material-symbols-outlined text-[16px]">payments</span>
-                                                </div>
-                                                <div>
-                                                    <p class="text-[11px] font-bold text-slate-700 leading-none">{{ $wallet->nama }}</p>
-                                                    <p class="text-[9px] font-medium text-slate-400 mt-1">Saldo: Rp {{ number_format($wallet->balance, 0, ',', '.') }}</p>
-                                                </div>
-                                            </div>
-                                            <div x-show="selectedWallet === '{{ $wallet->nama }}'" class="text-primary">
-                                                <span class="material-symbols-outlined text-[18px]">check_circle</span>
-                                            </div>
-                                        </button>
-                                    @endforeach
+                            
+                            <template x-if="filteredItems().length === 0">
+                                <div class="py-10 text-center">
+                                    <p class="text-[10px] font-bold text-slate-300 uppercase tracking-widest leading-tight">Tidak ada item di mode ini</p>
                                 </div>
                             </template>
                         </div>
@@ -260,6 +252,13 @@
                 resultData: null,
                 recognition: null,
                 selectedWallet: '',
+                selectedWalletId: null,
+                activeTab: 'pos',
+                selectedContext: '{{ Auth::user()->current_group_id ?: "personal" }}',
+                
+                // From PHP
+                allWallets: {{ json_encode($wallets) }},
+                allPos: {{ json_encode($posItems) }},
 
                 init() {
                     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -318,6 +317,27 @@
                     // Watch for tab & wallet changes to save in cookies
                     this.$watch('activeTab', value => this.setCookie('famly_last_tab', value, 30));
                     this.$watch('selectedWallet', value => this.setCookie('famly_last_wallet', value, 30));
+                },
+
+                filteredItems() {
+                    let items = this.activeTab === 'pos' ? this.allPos : this.allWallets;
+                    if (this.selectedContext === 'personal') {
+                        return items.filter(i => !i.group_id);
+                    } else {
+                        return items.filter(i => i.group_id == this.selectedContext);
+                    }
+                },
+
+                switchContext(newContext) {
+                    this.selectedContext = newContext;
+                    const items = this.filteredItems();
+                    if (items.length) {
+                        this.selectedWallet = items[0].nama;
+                        this.selectedWalletId = items[0].id;
+                    } else {
+                        this.selectedWallet = '';
+                        this.selectedWalletId = null;
+                    }
                 },
 
                 setCookie(name, value, days) {
@@ -397,7 +417,8 @@
                                 merchant: this.resultData.merchant,
                                 description: this.resultData.description,
                                 wallet_name: this.selectedWallet,
-                                items: this.resultData.items
+                                items: this.resultData.items,
+                                group_id: this.selectedContext
                             })
                         });
 

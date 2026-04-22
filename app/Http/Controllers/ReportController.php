@@ -11,10 +11,161 @@ use Illuminate\Support\Facades\DB;
 
 class ReportController extends Controller
 {
+    /**
+     * Main Premium Dashboard for Reports
+     */
+    public function index(Request $request)
+    {
+        $user = auth()->user();
+        $groupId = $user->current_group_id;
+        $month = $request->get('month', now()->month);
+        $year = $request->get('year', now()->year);
+        $startDate = Carbon::createFromDate($year, $month, 1)->startOfMonth();
+        $endDate = $startDate->copy()->endOfMonth();
+
+        // 1. Unified Monthly Highlights (In vs Out)
+        $monthlySums = Tabungan::query()
+            ->join('kategori_jenis_tabungans', 'tabungans.jenis', '=', 'kategori_jenis_tabungans.id')
+            ->where(function($q) use ($groupId, $user) {
+                if ($groupId) $q->where('tabungans.group_id', $groupId);
+                else $q->where('tabungans.user_id', $user->id)->whereNull('tabungans.group_id');
+            })
+            ->whereBetween('tabungans.created_at', [$startDate, $endDate])
+            ->selectRaw("
+                SUM(CASE WHEN kategori_jenis_tabungans.jenis = 'Pemasukan' THEN tabungans.nominal ELSE 0 END) as total_in,
+                SUM(CASE WHEN kategori_jenis_tabungans.jenis = 'Pengeluaran' THEN tabungans.nominal ELSE 0 END) as total_out
+            ")
+            ->first();
+
+        // 2. High Density Management Breakdown (Pos, Wallets, Savings)
+        $categories = KategoriNamaTabungan::all(); // Handled by GroupScope automatically
+        
+        // Single aggregated query for all category balances in this month
+        $catMonthlyStats = Tabungan::query()
+            ->join('kategori_jenis_tabungans', 'tabungans.jenis', '=', 'kategori_jenis_tabungans.id')
+            ->where(function($q) use ($groupId, $user) {
+                if ($groupId) $q->where('tabungans.group_id', $groupId);
+                else $q->where('tabungans.user_id', $user->id)->whereNull('tabungans.group_id');
+            })
+            ->whereBetween('tabungans.created_at', [$startDate, $endDate])
+            ->select('tabungans.nama', \DB::raw("
+                SUM(CASE WHEN kategori_jenis_tabungans.jenis = 'Pemasukan' THEN tabungans.nominal ELSE 0 END) as income,
+                SUM(CASE WHEN kategori_jenis_tabungans.jenis = 'Pengeluaran' THEN tabungans.nominal ELSE 0 END) as expense
+            "))
+            ->groupBy('tabungans.nama')
+            ->get()
+            ->keyBy('nama');
+
+        $breakdown = [
+            'pos' => ['count' => 0, 'income' => 0, 'expense' => 0],
+            'wallet' => ['count' => 0, 'income' => 0, 'expense' => 0],
+            'savings' => ['count' => 0, 'income' => 0, 'expense' => 0],
+        ];
+
+        foreach ($categories as $cat) {
+            $type = $cat->wallet_type ?? 'pos';
+            if (isset($breakdown[$type])) {
+                $stat = $catMonthlyStats->get($cat->id);
+                $breakdown[$type]['count']++;
+                $breakdown[$type]['income'] += $stat->income ?? 0;
+                $breakdown[$type]['expense'] += $stat->expense ?? 0;
+            }
+        }
+
+        // 3. Transaction History (NEW)
+        $transactions = Tabungan::with(['kategoriJenis', 'kategoriNama'])
+            ->whereBetween('created_at', [$startDate, $endDate])
+            ->whereHas('kategoriNama') // Ensure valid relationship
+            ->whereHas('kategoriJenis') // Ensure valid relationship
+            ->orderBy('created_at', 'desc')
+            ->take(10)
+            ->get();
+
+        // 4. Monetization Context (Business Model)
+        $isPremium = $user->isPremium(); 
+
+        // 5. Strict history locking for trial users
+        // Rule: Trial only sees current month. 
+        // We define "accessible" as the month of today or if they have paid for this specific month.
+        $isAccessible = $startDate->isCurrentMonth() || ($startDate->month == now()->month && $startDate->year == now()->year);
+        
+        if (!$isPremium && !$isAccessible && !session('paid_month_' . $month . '_' . $year)) {
+            return view('reports.locked', [
+                'startDate' => $startDate,
+                'isPremium' => $isPremium,
+                'month' => $month,
+                'year' => $year
+            ]);
+        }
+
+        // 6. AI Smart Recommendation / Insight (Real Analysis)
+        $aiService = new AiFinancialInsight();
+        $aiInsight = $isPremium ? $aiService->getInsight() : "Layanan AI terbatas untuk akun Trial. Upgrade ke Premium untuk mendapatkan wawasan mendalam tentang pengeluaran keluarga Anda.";
+
+        return view('reports.index', compact(
+            'monthlySums',
+            'breakdown',
+            'transactions',
+            'aiInsight',
+            'startDate',
+            'month',
+            'year',
+            'isPremium'
+        ));
+    }
+
+    /**
+     * Download Financial Report (PDF Logic)
+     */
+    public function download(Request $request)
+    {
+        $user = auth()->user();
+        $month = $request->get('month', now()->month);
+        $year = $request->get('year', now()->year);
+
+        $hasPaid = session('paid_month_' . $month . '_' . $year);
+
+        if (!$user->isPremium() && !$hasPaid) {
+            return redirect()->route('reports.index', ['month' => $month, 'year' => $year])
+                ->with('error', 'Download laporan terkunci. Silakan upgrade ke Premium atau beli laporan ini.');
+        }
+
+        // Simulating PDF generation with a view print
+        return view('reports.pdf-template', [
+            'user' => $user,
+            'month' => $month,
+            'year' => $year,
+            'is_download' => true
+        ]);
+    }
+
+    /**
+     * Upgrade to Premium (Redirect to Checkout)
+     */
+    public function upgradeSubscription()
+    {
+        return redirect()->route('checkout.index', ['type' => 'subscription']);
+    }
+
+    /**
+     * Simulation: Buy One-Off Report (Redirect to Checkout with Params)
+     */
+    public function buyOneOffReport(Request $request)
+    {
+        $month = $request->get('month');
+        $year = $request->get('year');
+        
+        return redirect()->route('checkout.index', [
+            'type' => 'report',
+            'month' => $month,
+            'year' => $year
+        ]);
+    }
+
     public function categoryAnalysis(Request $request)
     {
         $user = auth()->user();
-        $familyId = $user->family_id;
+        $groupId = $user->current_group_id;
         $month = $request->get('month', now()->month);
         $year = $request->get('year', now()->year);
         $selectedDate = Carbon::createFromDate($year, $month, 1);
@@ -23,7 +174,10 @@ class ReportController extends Controller
         // 1. Consolidated Monthly Summary
         $monthlySums = Tabungan::query()
             ->join('kategori_jenis_tabungans', 'tabungans.jenis', '=', 'kategori_jenis_tabungans.id')
-            ->where('tabungans.family_id', $familyId)
+            ->where(function($q) use ($groupId, $user) {
+                if ($groupId) $q->where('tabungans.group_id', $groupId);
+                else $q->where('tabungans.user_id', $user->id)->whereNull('tabungans.group_id');
+            })
             ->where('kategori_jenis_tabungans.jenis', 'Pengeluaran')
             ->selectRaw("
                 SUM(CASE WHEN MONTH(tabungans.created_at) = ? AND YEAR(tabungans.created_at) = ? THEN tabungans.nominal ELSE 0 END) as current_spending,
@@ -42,7 +196,10 @@ class ReportController extends Controller
         
         $rawWeekly = Tabungan::query()
             ->join('kategori_jenis_tabungans', 'tabungans.jenis', '=', 'kategori_jenis_tabungans.id')
-            ->where('tabungans.family_id', $familyId)
+            ->where(function($q) use ($groupId, $user) {
+                if ($groupId) $q->where('tabungans.group_id', $groupId);
+                else $q->where('tabungans.user_id', $user->id)->whereNull('tabungans.group_id');
+            })
             ->where('kategori_jenis_tabungans.jenis', 'Pengeluaran')
             ->where(function($q) use ($month, $year, $prevMonthDate) {
                 $q->where(function($sub) use ($month, $year) {
@@ -76,7 +233,10 @@ class ReportController extends Controller
         $topCategories = Tabungan::query()
             ->join('kategori_nama_tabungans', 'tabungans.nama', '=', 'kategori_nama_tabungans.id')
             ->join('kategori_jenis_tabungans', 'tabungans.jenis', '=', 'kategori_jenis_tabungans.id')
-            ->where('tabungans.family_id', $familyId)
+            ->where(function($q) use ($groupId, $user) {
+                if ($groupId) $q->where('tabungans.group_id', $groupId);
+                else $q->where('tabungans.user_id', $user->id)->whereNull('tabungans.group_id');
+            })
             ->where('kategori_jenis_tabungans.jenis', 'Pengeluaran')
             ->whereMonth('tabungans.created_at', $month)
             ->whereYear('tabungans.created_at', $year)
@@ -90,7 +250,10 @@ class ReportController extends Controller
         if ($topCategories->isNotEmpty()) {
             $prevTotals = Tabungan::query()
                 ->join('kategori_jenis_tabungans', 'tabungans.jenis', '=', 'kategori_jenis_tabungans.id')
-                ->where('tabungans.family_id', $familyId)
+                ->where(function($q) use ($groupId, $user) {
+                    if ($groupId) $q->where('tabungans.group_id', $groupId);
+                    else $q->where('tabungans.user_id', $user->id)->whereNull('tabungans.group_id');
+                })
                 ->whereIn('tabungans.nama', $topCategories->pluck('nama'))
                 ->whereMonth('tabungans.created_at', $prevMonthDate->month)
                 ->whereYear('tabungans.created_at', $prevMonthDate->year)

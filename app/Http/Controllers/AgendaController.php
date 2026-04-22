@@ -14,12 +14,65 @@ use Carbon\Carbon;
 class AgendaController extends Controller
 {
     /**
+     * AI Intelligence: Analyze pending agenda items and provide a 'nudge' or 'motivation'.
+     */
+    public function aiCheckIn()
+    {
+        $user = Auth::user();
+        $groupId = $user->current_group_id;
+
+        $pending = PlannedTransaction::where('status', 'pending')
+            ->where(function($q) use ($groupId, $user) {
+                if ($groupId) $q->where('group_id', $groupId);
+                else $q->where('user_id', $user->id)->whereNull('group_id');
+            })
+            ->get();
+
+        if ($pending->isEmpty()) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Luar biasa! Tidak ada agenda yang tertunda. Pertahankan ritme ini!'
+            ]);
+        }
+
+        $itemsStr = $pending->map(fn($p) => "- [{$p->activity_type}] {$p->keterangan}")->implode("\n");
+        
+        $aiService = new \App\Services\AiFinancialInsight();
+        $prompt = "
+        Analisis daftar agenda yang tertunda ini untuk keluarga:
+        {$itemsStr}
+        
+        TUGAS:
+        Berikan 1 kalimat motivasi yang gaul, lugas, dan praktis (Smart Nudge) agar user segera menyelesaikannya. 
+        Jika ada ritual grup, tekankan pentingnya kebersamaan. 
+        Maksimal 20 kata.
+        ";
+
+        try {
+            // Reflective call to private askAi if needed or just use getSmartPick logic
+            // Since AiFinancialInsight is our hub, we'll use a new method there or simulate here.
+            $response = $aiService->chat($prompt); // Reusing chat for general prompt
+            $response = strip_tags($response);
+            
+            return response()->json([
+                'success' => true,
+                'message' => $response
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Si Famly sedang beristirahat sejenak. Cek lagi nanti ya!'
+            ]);
+        }
+    }
+
+    /**
      * Display the family agenda.
      */
     public function index(Request $request)
     {
         $user = Auth::user();
-        $familyId = $user->family_id;
+        $groupId = $user->current_group_id;
 
         // Capture Month/Year/Type from filter, fallback to current
         $month = $request->get('month', now()->month);
@@ -39,14 +92,12 @@ class AgendaController extends Controller
             $fetchEnd = $endOfMonth->copy()->endOfWeek(Carbon::SUNDAY);
         }
 
-        // Fetch all planned transactions for the family within the calculated range
+        // Fetch all planned transactions within the calculated range (Scoped by GroupScope)
         $plannedTransactions = PlannedTransaction::with(['user', 'kategoriNama', 'kategoriJenis'])
-            ->where('family_id', $familyId)
-            ->where(function($q) use ($fetchStart, $fetchEnd, $familyId) {
+            ->where(function($q) use ($fetchStart, $fetchEnd) {
                 $q->whereBetween('jatuh_tempo', [$fetchStart, $fetchEnd])
-                  ->orWhere(function($sub) use ($familyId) {
-                      $sub->where('family_id', $familyId)
-                          ->where('status', 'pending')
+                  ->orWhere(function($sub) {
+                      $sub->where('status', 'pending')
                           ->where('jatuh_tempo', '<', now());
                   });
             })
@@ -54,9 +105,10 @@ class AgendaController extends Controller
             ->orderBy('jatuh_tempo', 'asc')
             ->get();
 
-        // Categorize for counting
-        $reminders = $plannedTransactions->filter(fn($i) => $this->isReminder($i));
-        $tasks = $plannedTransactions->reject(fn($i) => $this->isReminder($i));
+        // Use activity_type for categorization
+        $reminders = $plannedTransactions->where('activity_type', 'reminder');
+        $tasks = $plannedTransactions->where('activity_type', 'task');
+        $rituals = $plannedTransactions->where('activity_type', 'ritual');
 
         // Calendar Generation
         if ($viewType === 'month') {
@@ -96,7 +148,7 @@ class AgendaController extends Controller
             }
         }
 
-        return view('agenda.index', compact('reminders', 'tasks', 'calendarDays', 'month', 'year', 'viewType'));
+        return view('agenda.index', compact('reminders', 'tasks', 'rituals', 'calendarDays', 'month', 'year', 'viewType'));
     }
 
     private function isReminder($item)
@@ -125,6 +177,16 @@ class AgendaController extends Controller
      */
     public function store(Request $request)
     {
+        $user = auth()->user();
+        
+        // Validation for group creation
+        if ($request->is_group && $user->current_group_id) {
+            $group = \App\Models\Group::find($user->current_group_id);
+            if (!$group || !$group->isAdmin($user->id)) {
+                return back()->with('error', 'Hanya Admin yang dapat membuat agenda grup.');
+            }
+        }
+
         // 1. Handle Simple Agenda Popup (High-Density UI)
         if ($request->has('nama_manual')) {
             $request->validate([
@@ -158,6 +220,8 @@ class AgendaController extends Controller
                 }
             }
 
+            $isGroup = $request->input('is_group') == '1' && $user->current_group_id;
+
             PlannedTransaction::create([
                 'nama' => $defaultName,
                 'jenis' => $defaultJenis,
@@ -167,7 +231,9 @@ class AgendaController extends Controller
                 'is_priority' => $request->input('is_priority') == '1',
                 'timeline_data' => count($timelineData) > 0 ? $timelineData : null,
                 'user_id' => auth()->id(),
-                'family_id' => auth()->user()->family_id,
+                'group_id' => $isGroup ? $user->current_group_id : null,
+                'is_group' => $isGroup,
+                'activity_type' => $request->type_selection ?? 'task',
                 'status' => 'pending'
             ]);
 
@@ -184,7 +250,9 @@ class AgendaController extends Controller
         ]);
 
         $validated['user_id'] = auth()->id();
-        $validated['family_id'] = auth()->user()->family_id;
+        $validated['group_id'] = $request->is_group ? auth()->user()->current_group_id : null;
+        $validated['is_group'] = $request->is_group ? true : false;
+        $validated['activity_type'] = $request->activity_type ?? 'task';
         
         PlannedTransaction::create($validated);
 
@@ -262,7 +330,7 @@ class AgendaController extends Controller
             'nominal' => $agenda->nominal,
             'keterangan' => $agenda->keterangan . " (Realisasi dari agenda)",
             'user_id' => auth()->id(),
-            'family_id' => auth()->user()->family_id,
+            'group_id' => $agenda->group_id,
             'created_at' => $request->tanggal_peristiwa,
             'updated_at' => $request->tanggal_peristiwa,
             'status' => 'verified'
@@ -273,6 +341,20 @@ class AgendaController extends Controller
             'user_id' => auth()->id(),
             'tanggal_peristiwa' => $request->tanggal_peristiwa,
         ]);
+
+        // Orchestration: If this is a Group Ritual, notify other members
+        if ($agenda->is_group && $agenda->activity_type === 'ritual' && $agenda->group) {
+            $otherMembers = $agenda->group->members()->where('user_id', '!=', auth()->id())->get();
+            foreach ($otherMembers as $member) {
+                \App\Models\Notification::create([
+                    'user_id' => $member->id,
+                    'title' => 'Ritual Selesai!',
+                    'message' => auth()->user()->name . " baru saja menyelesaikan ritual '{$agenda->keterangan}' untuk grup.",
+                    'type' => 'success',
+                    'link' => route('agenda.index')
+                ]);
+            }
+        }
 
         return redirect()->route('agenda.index')->with('success', 'Agenda berhasil diselesaikan!');
     }

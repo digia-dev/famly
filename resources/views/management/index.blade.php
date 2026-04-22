@@ -27,7 +27,11 @@
                 <div class="relative z-10 space-y-4">
                     <div>
                         <p class="text-[10px] font-bold tracking-tight text-white/60 mb-1 uppercase tracking-widest leading-none">
-                            {{ $type === 'pos' ? 'Kapasitas Anggaran' : ($type === 'dompet' ? 'Total Aset Keluarga' : 'Total Tabungan') }}
+                            @if(Auth::user()->current_group_id)
+                                {{ Auth::user()->currentGroup->name }} • {{ $type === 'pos' ? 'Kapasitas Anggaran' : ($type === 'dompet' ? 'Total Aset Grup' : 'Total Tabungan Grup') }}
+                            @else
+                                Pribadi • {{ $type === 'pos' ? 'Kapasitas Anggaran' : ($type === 'dompet' ? 'Total Aset Personal' : 'Total Tabungan') }}
+                            @endif
                         </p>
                         <h2 class="text-2xl font-black tracking-tighter leading-none mb-1">
                             Rp {{ number_format($totalBalance, 0, ',', '.') }}

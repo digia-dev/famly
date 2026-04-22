@@ -88,7 +88,8 @@
                         let tempContent = content;
 
                         cardPatterns.forEach(pattern => {
-                            const regex = new RegExp(`\\[${pattern.tag}\\]([\\s\\S]*?)\\[\\/?${pattern.tag}\\]`, 'g');
+                            // More robust regex that handles both [TAG]...[/TAG] and [TAG]{...} formats
+                            const regex = new RegExp(`\\[${pattern.tag}\\]\\s*({[\\s\\S]*?})(?:\\[\\/${pattern.tag}\\])?`, 'g');
                             let match;
                             while ((match = regex.exec(content)) !== null) {
                                 try {
@@ -210,7 +211,8 @@
             scrollToBottom() {
                 const el = document.getElementById('chat-scroll');
                 if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
-            }
+            },
+            showActivityPanel: false
          }">
         
         <!-- NATIVE HEADER (Dashboard Theme) -->
@@ -220,13 +222,47 @@
                     <span class="material-symbols-outlined text-[20px]">arrow_back</span>
                 </a>
                 <div class="flex-1">
-                    <h1 class="text-[14px] font-extrabold text-slate-800 leading-none">Si Famly</h1>
-                    <p class="text-[9px] font-bold text-[#00AA13] mt-1 uppercase tracking-tight">Asisten Keuangan Cerdas</p>
+                    <h1 class="text-[14px] font-extrabold text-slate-800 leading-none">
+                        {{ $activeGroup->name ?? 'Si Famly' }}
+                    </h1>
+                    <p class="text-[9px] font-bold text-[#00AA13] mt-1 uppercase tracking-tight">
+                        {{ $activeGroup ? 'Orchestra Hub Active' : 'Asisten Keuangan Cerdas' }}
+                    </p>
                 </div>
-                <div class="flex items-center gap-2">
-                    <div class="w-8 h-8 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center text-[#00AA13]">
-                        <span class="material-symbols-outlined text-[16px]">verified_user</span>
-                    </div>
+                <div class="flex items-center gap-1.5" x-data="{ 
+                    hasNewActivity: {{ count($recentTransactions) > 0 ? 'true' : 'false' }},
+                    showBadge: localStorage.getItem('last_seen_activity') != '{{ count($recentTransactions) > 0 ? $recentTransactions->first()->id : 0 }}'
+                }">
+                    <!-- Link ke Workspace / Detail (Grup atau Pribadi) -->
+                    @if($activeGroup)
+                    <a href="{{ route('groups.show', $activeGroup->id) }}" class="w-9 h-9 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center active:scale-90 transition-all shadow-sm border border-amber-100/50" title="Detail Grup">
+                        <span class="material-symbols-outlined text-[18px]">groups</span>
+                    </a>
+                    @else
+                    <a href="{{ route('personal.workspace') }}" class="w-9 h-9 rounded-2xl bg-emerald-50 text-[#00AA13] flex items-center justify-center active:scale-90 transition-all shadow-sm border border-emerald-100/50" title="Workspace Pribadi">
+                        <span class="material-symbols-outlined text-[18px]">person</span>
+                    </a>
+                    @endif
+
+                    <!-- Link ke Analisis -->
+                    <a href="{{ route('reports.index') }}" class="w-9 h-9 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center active:scale-90 transition-all shadow-sm border border-blue-100/50" title="Analisis Keuangan">
+                        <span class="material-symbols-outlined text-[18px]">insights</span>
+                    </a>
+
+                    <!-- Link ke Transaksi (Trigger Activity Panel) -->
+                    <button @click="showActivityPanel = true; showBadge = false; localStorage.setItem('last_seen_activity', '{{ count($recentTransactions) > 0 ? $recentTransactions->first()->id : 0 }}')" 
+                            class="relative w-9 h-9 rounded-2xl bg-emerald-50 text-[#00AA13] flex items-center justify-center active:scale-90 transition-all shadow-sm border border-emerald-100/50" 
+                            title="Log Transaksi Grup">
+                        <span class="material-symbols-outlined text-[18px]">receipt_long</span>
+                        <template x-if="showBadge">
+                            <span class="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-rose-500 border-2 border-white rounded-full animate-pulse shadow-sm"></span>
+                        </template>
+                    </button>
+
+                    <!-- Link ke Agenda -->
+                    <a href="{{ route('agenda.index') }}" class="w-9 h-9 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center active:scale-90 transition-all shadow-sm border border-purple-100/50" title="Agenda & Task">
+                        <span class="material-symbols-outlined text-[18px]">calendar_month</span>
+                    </a>
                 </div>
             </div>
         </header>
@@ -234,6 +270,11 @@
         <!-- CHAT AREA (Scroll Container) -->
         <main id="chat-scroll" class="flex-1 pt-20 pb-28 px-4 overflow-y-auto no-scrollbar space-y-6">
             <div class="max-w-2xl mx-auto space-y-6 pb-4">
+                <!-- Group Switcher (Now centralized in Chat) -->
+                <div class="bg-white rounded-[32px] p-2 shadow-sm border border-slate-100/50 mb-2">
+                    <p class="text-[9px] font-black text-slate-400 uppercase tracking-widest px-4 pt-2">Pilih Konteks Diskusi</p>
+                    @include('admin.partials.group-shortcuts')
+                </div>
                 
                 <!-- Welcome Card (Native Style) -->
                 <div class="flex justify-start">
@@ -339,12 +380,25 @@
                                 </template>
 
                                 <template x-if="msg.type === 'financial_summary'">
-                                    <div class="min-w-[240px] space-y-4">
-                                        <h4 class="text-[12px] font-extrabold uppercase text-slate-800 tracking-tight" x-text="msg.title"></h4>
-                                        <div class="space-y-2">
-                                            <template x-for="item in msg.items"><div class="flex justify-between text-[11px] font-bold"><span class="text-slate-400" x-text="item.label"></span><span class="text-slate-700" x-text="formatRupiah(item.value)"></span></div></template>
+                                    <div class="min-w-[260px] space-y-3">
+                                        <div class="flex items-center gap-2 mb-1">
+                                            <div class="w-6 h-6 rounded-lg bg-emerald-50 text-[#00AA13] flex items-center justify-center">
+                                                <span class="material-symbols-outlined text-[14px]">account_balance_wallet</span>
+                                            </div>
+                                            <h4 class="text-[11px] font-black uppercase text-slate-400 tracking-widest" x-text="msg.title"></h4>
                                         </div>
-                                        <div class="pt-3 border-t flex justify-between items-center"><span class="text-[9px] font-extrabold text-slate-300">ESTIMASI TOTAL</span><span class="text-[18px] font-extrabold text-[#00AA13]" x-text="msg.footer"></span></div>
+                                        <div class="bg-slate-50/50 rounded-2xl p-3 border border-slate-100/50 space-y-2">
+                                            <template x-for="item in msg.items">
+                                                <div class="flex justify-between items-center text-[12px]">
+                                                    <span class="font-bold text-slate-500" x-text="item.label"></span>
+                                                    <span class="font-black text-slate-800" x-text="formatRupiah(item.value)"></span>
+                                                </div>
+                                            </template>
+                                        </div>
+                                        <div class="flex justify-between items-end pt-1 px-1">
+                                            <span class="text-[9px] font-black text-slate-300 uppercase tracking-tighter">Total Estimasi</span>
+                                            <span class="text-[16px] font-black text-[#00AA13]" x-text="msg.footer || formatRupiah(msg.items.reduce((sum, i) => sum + parseInt(i.value || 0), 0))"></span>
+                                        </div>
                                     </div>
                                 </template>
 
@@ -366,6 +420,18 @@
             </div>
         </main>
 
+        <!-- Overlay backdrop for panel -->
+        <div x-show="showActivityPanel" 
+             @click="showActivityPanel = false"
+             x-transition:enter="transition opacity ease-out duration-300"
+             x-transition:enter-start="opacity-0"
+             x-transition:enter-end="opacity-100"
+             x-transition:leave="transition opacity ease-in duration-200"
+             x-transition:leave-start="opacity-100"
+             x-transition:leave-end="opacity-0"
+             class="fixed inset-0 bg-slate-900/20 backdrop-blur-[2px] z-[105]">
+        </div>
+
         <!-- NATIVE INPUT BAR (Dashboard Style) -->
         <div class="fixed bottom-0 left-0 right-0 sm:left-64 z-[110] bg-white border-t border-slate-100 p-4 pb-safe shadow-[0_-10px_40px_rgb(0,0,0,0.06)]">
             <div class="max-w-2xl mx-auto flex items-center gap-3">
@@ -381,7 +447,6 @@
                     <div class="flex items-center gap-1 border-l border-slate-200 ml-2 pl-2">
                         <button @click="triggerUpload(false)" class="w-9 h-9 flex items-center justify-center text-slate-400 hover:text-[#00AA13] transition-colors"><span class="material-symbols-outlined text-[20px]">attach_file</span></button>
                         <button @click="triggerUpload(true)" class="w-9 h-9 flex items-center justify-center text-slate-400 hover:text-[#00AA13] transition-colors"><span class="material-symbols-outlined text-[20px]">photo_camera</span></button>
-                        <input type="file" x-ref="fileInput" class="hidden" @change="handleFileUpload($event)" accept="image/*">
                     </div>
                 </div>
 
@@ -390,6 +455,62 @@
                         :class="(userInput.trim() || loading) ? 'native-gradient' : (isRecording ? 'bg-rose-500 shadow-rose-500/20 animate-pulse' : 'native-gradient')">
                     <span class="material-symbols-outlined text-[20px]" x-text="(userInput.trim() || loading) ? 'send' : (isRecording ? 'stop' : 'mic')"></span>
                 </button>
+            </div>
+            <!-- Hidden File Input -->
+            <input type="file" x-ref="fileInput" class="hidden" @change="handleFileUpload($event)">
+        </div>
+
+        <!-- SLIDE-OVER ACTIVITY PANEL -->
+        <div x-show="showActivityPanel" 
+             x-transition:enter="transition ease-out duration-300"
+             x-transition:enter-start="translate-x-full"
+             x-transition:enter-end="translate-x-0"
+             x-transition:leave="transition ease-in duration-200"
+             x-transition:leave-start="translate-x-0"
+             x-transition:leave-end="translate-x-full"
+             class="fixed inset-y-0 right-0 w-full sm:w-80 bg-white shadow-2xl z-[120] border-l border-slate-100 flex flex-col pt-safe"
+             @click.away="showActivityPanel = false">
+            
+            <div class="h-16 px-4 border-b border-slate-50 flex items-center justify-between bg-slate-50/50">
+                <div class="flex items-center gap-2">
+                    <span class="material-symbols-outlined text-amber-500 text-[20px]">history</span>
+                    <span class="text-sm font-black text-slate-800">Aktivitas Terkini</span>
+                </div>
+                <button @click="showActivityPanel = false" class="w-10 h-10 rounded-2xl hover:bg-slate-200 flex items-center justify-center text-slate-400 transition-all active:scale-90">
+                    <span class="material-symbols-outlined text-[20px]">close</span>
+                </button>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar">
+                @forelse($recentTransactions as $tx)
+                <div class="p-4 bg-slate-50 rounded-2xl border border-slate-100 hover:border-amber-100 transition-colors group">
+                    <div class="flex justify-between items-start mb-2">
+                        <div class="flex items-center gap-2">
+                             <div class="w-2 h-2 rounded-full {{ $tx->nominal < 0 ? 'bg-red-400' : 'bg-emerald-400' }}"></div>
+                             <span class="text-[10px] font-black text-slate-400 uppercase tracking-tighter">{{ $tx->kategoriNama->nama ?? 'Umum' }}</span>
+                        </div>
+                        <span class="text-[9px] font-bold text-slate-300 uppercase italic">{{ $tx->created_at->diffForHumans() }}</span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <p class="text-[12px] font-bold text-slate-700 truncate max-w-[120px]">{{ $tx->keterangan }}</p>
+                        <p class="text-[12px] font-black {{ $tx->nominal < 0 ? 'text-red-500' : 'text-emerald-600' }}">
+                            {{ $tx->nominal < 0 ? '-' : '+' }} Rp {{ number_format(abs($tx->nominal), 0, ',', '.') }}
+                        </p>
+                    </div>
+                </div>
+                @empty
+                <div class="h-full flex flex-col items-center justify-center opacity-30 py-20 grayscale">
+                    <span class="material-symbols-outlined text-[48px] mb-2 font-thin">receipt_long</span>
+                    <p class="text-[11px] font-black uppercase tracking-widest text-slate-400">Belum ada transaksi</p>
+                </div>
+                @endforelse
+            </div>
+
+            <div class="p-4 border-t border-slate-50 bg-slate-50/30">
+                <a href="{{ route('management.index') }}" class="w-full py-4 bg-[#00AA13] rounded-2xl text-[11px] font-black text-white flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 active:scale-95 transition-all">
+                    Detail Riwayat Dompet
+                    <span class="material-symbols-outlined text-[16px]">arrow_forward</span>
+                </a>
             </div>
         </div>
     </div>

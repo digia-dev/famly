@@ -13,7 +13,7 @@ class Tabungan extends Model
 
     protected static function booted(): void
     {
-        static::addGlobalScope(new \App\Models\Scopes\FamilyScope);
+        static::addGlobalScope(new \App\Models\Scopes\GroupScope);
     }
 
     protected $fillable = [
@@ -22,7 +22,7 @@ class Tabungan extends Model
         'nominal',
         'keterangan',
         'user_id',
-        'family_id',
+        'group_id',
         'status',
         'metadata_ai',
         'created_at'
@@ -34,9 +34,9 @@ class Tabungan extends Model
         'deleted_at' => 'datetime'
     ];
 
-    public function user()
+    public function group()
     {
-        return $this->belongsTo(User::class);
+        return $this->belongsTo(Group::class, 'group_id');
     }
 
     public function kategoriNama()

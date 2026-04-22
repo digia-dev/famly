@@ -23,14 +23,14 @@ class AdminController extends Controller
         }
         
         $user = Auth::user();
-        $familyId = $user->family_id;
         $now = now();
+        $groupId = $user->current_group_id;
+        $userGroups = $user->groups()->wherePivot('status', 'Active')->get();
         
-        // 1. Unified Financial Summary (Optimized with JOIN)
-        $sums = Tabungan::query()
-            ->join('kategori_jenis_tabungans', 'tabungans.jenis', '=', 'kategori_jenis_tabungans.id')
-            ->where('tabungans.family_id', $familyId)
-            ->selectRaw("
+        $sumsQuery = Tabungan::query()
+            ->join('kategori_jenis_tabungans', 'tabungans.jenis', '=', 'kategori_jenis_tabungans.id');
+            
+        $sums = $sumsQuery->selectRaw("
                 SUM(CASE WHEN kategori_jenis_tabungans.jenis = 'Pemasukan' THEN tabungans.nominal ELSE 0 END) as total_in,
                 SUM(CASE WHEN kategori_jenis_tabungans.jenis = 'Pengeluaran' THEN tabungans.nominal ELSE 0 END) as total_out,
                 SUM(CASE WHEN kategori_jenis_tabungans.jenis = 'Pemasukan' AND MONTH(tabungans.created_at) = ? AND YEAR(tabungans.created_at) = ? THEN tabungans.nominal ELSE 0 END) as month_in,
@@ -65,7 +65,6 @@ class AdminController extends Controller
         // 2. Optimized Wallet Balance Logic (Optimized with JOIN)
         $allBalancesRaw = Tabungan::query()
             ->join('kategori_jenis_tabungans', 'tabungans.jenis', '=', 'kategori_jenis_tabungans.id')
-            ->where('tabungans.family_id', $familyId)
             ->select('tabungans.nama', \DB::raw("
                 SUM(CASE WHEN kategori_jenis_tabungans.jenis = 'Pemasukan' THEN tabungans.nominal ELSE 0 END) 
                 - SUM(CASE WHEN kategori_jenis_tabungans.jenis = 'Pengeluaran' THEN tabungans.nominal ELSE 0 END) as final_balance
@@ -73,7 +72,7 @@ class AdminController extends Controller
             ->groupBy('tabungans.nama')
             ->pluck('final_balance', 'nama'); 
 
-        $userWallets = KategoriNamaTabungan::where('family_id', $familyId)->get();
+        $userWallets = KategoriNamaTabungan::all();
         
         $walletsWithBalance = $userWallets->map(function($cat) use ($allBalancesRaw) {
             return (object) [
@@ -86,6 +85,28 @@ class AdminController extends Controller
         $totalLiquid = $walletsWithBalance->whereIn('type', ['pos', 'wallet'])->sum('balance');
         $totalPos = $walletsWithBalance->where('type', 'pos')->sum('balance');
         $totalWallet = $walletsWithBalance->where('type', 'wallet')->sum('balance');
+
+        // 3. Detailed Savings Progress List (NEW)
+        $savingsCategories = KategoriNamaTabungan::where('wallet_type', 'savings')
+            ->get();
+            
+        $savingsList = $savingsCategories->map(function($cat) use ($allBalancesRaw) {
+            $balance = $allBalancesRaw[$cat->id] ?? 0;
+            $target = $cat->target_saldo ?? 0;
+            $percent = $target > 0 ? min(($balance / $target) * 100, 100) : 0;
+            $shortfall = $target > 0 ? max($target - $balance, 0) : 0;
+            
+            return (object) [
+                'id' => $cat->id,
+                'nama' => $cat->nama,
+                'icon' => $cat->icon ?? 'savings',
+                'balance' => $balance,
+                'target' => $target,
+                'percent' => round($percent, 1),
+                'shortfall' => $shortfall,
+                'color' => $cat->color ?? '#00AA13',
+            ];
+        });
 
         // Growth/Progress Metrics
         $totalTargetSavings = $userWallets->where('wallet_type', 'savings')->sum('target_saldo');
@@ -125,9 +146,8 @@ class AdminController extends Controller
         
         $aiInsight = $smartTip;
         
-        // Fetch real agenda data
+        // Fetch real agenda data (Scoped by GroupScope)
         $agendas = PlannedTransaction::with(['kategoriJenis', 'kategoriNama', 'user'])
-            ->where('family_id', Auth::user()->family_id)
             ->where(function($q) {
                 // Tampilkan yang belum selesai (termasuk yang lewat jatuh tempo)
                 // ATAU yang baru saja diselesaikan dalam 12 jam terakhir
@@ -162,7 +182,9 @@ class AdminController extends Controller
             'pengeluaranHariIni',
             'namaKategori',
             'jenisKategori',
-            'agendas'
+            'agendas',
+            'savingsList',
+            'userGroups'
         ));
     }
     
@@ -258,6 +280,22 @@ class AdminController extends Controller
         $user->last_check_in_at = now();
         $user->save();
 
+        // Orchestration: Notify group members of the streak
+        if ($user->current_group_id) {
+            $group = \App\Models\Group::find($user->current_group_id);
+            if ($group) {
+                $otherMembers = $group->members()->where('user_id', '!=', $user->id)->get();
+                foreach ($otherMembers as $member) {
+                    \App\Models\Notification::create([
+                        'user_id' => $member->id,
+                        'title' => 'Streak Bertambah!',
+                        'message' => "{$user->name} baru saja absen! Streak saat ini: {$user->streak_count} hari.",
+                        'type' => 'success',
+                    ]);
+                }
+            }
+        }
+
         // Check for milestones (3, 7, 14, 30)
         $milestone = null;
         if (in_array($user->streak_count, [3, 7, 14, 30])) {
@@ -274,7 +312,7 @@ class AdminController extends Controller
 
     public function toggleAgenda($id)
     {
-        $agenda = PlannedTransaction::where('family_id', Auth::user()->family_id)->findOrFail($id);
+        $agenda = PlannedTransaction::findOrFail($id);
         $agenda->status = $agenda->status === 'done' ? 'pending' : 'done';
         $agenda->save();
 

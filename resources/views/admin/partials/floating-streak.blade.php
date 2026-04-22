@@ -87,9 +87,9 @@ x-init="init()">
             <div class="absolute -inset-1 bg-gradient-to-tr from-amber-500 to-rose-500 rounded-full blur-md opacity-20"></div>
             
             <!-- Shadow Number (Floating Indicator) -->
-            <div class="absolute -top-1 -right-1 z-10 font-black text-amber-600 text-[10px] bg-white w-5 h-5 flex items-center justify-center rounded-full shadow-md border border-amber-100" x-text="streak + 1"></div>
+            <div class="absolute -top-1 -right-1 z-10 font-black text-amber-600 text-[10px] bg-white w-5 h-5 flex items-center justify-center rounded-full shadow-lg" x-text="streak + 1"></div>
             
-            <div class="relative bg-white rounded-2xl p-2.5 shadow-xl border border-white/50">
+            <div class="relative bg-white rounded-2xl p-2.5 shadow-2xl">
                 <span class="material-symbols-outlined text-3xl text-amber-500 filter drop-shadow-[0_2px_5px_rgba(245,158,11,0.5)]" 
                       style="font-variation-settings: 'FILL' 1, 'wght' 700;">
                     local_fire_department

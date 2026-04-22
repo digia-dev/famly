@@ -19,7 +19,7 @@
                             {{ $item['category'] }}
                         </span>
                     </div>
-                    <h4 class="text-[12px] font-bold {{ $item['text'] }} leading-tight mb-1 truncate">{{ $item['title'] }}</h4>
+                    <h4 class="text-[12px] font-bold {{ $item['bg'] == 'bg-white' ? 'text-slate-900' : 'text-white' }} leading-tight mb-1 truncate">{{ $item['title'] }}</h4>
                     <p class="text-[10px] {{ $item['bg'] == 'bg-white' ? 'text-slate-400' : 'text-white/70' }} font-medium leading-normal mb-2 line-clamp-2 h-[30px]">{{ $item['description'] }}</p>
                     
                     <div class="flex items-center justify-between border-t {{ $item['bg'] == 'bg-white' ? 'border-slate-50' : 'border-white/10' }} pt-2">

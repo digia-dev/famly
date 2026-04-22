@@ -375,14 +375,19 @@ class TabunganController extends Controller
         $cleanedNominal = (int) str_replace(['.', ','], '', $validated['nominal']);
 
         // Buat data tabungan terlebih dahulu
-        $tabungan = Tabungan::create([
+        $tabunganData = [
             'nama' => $validated['nama'],
             'jenis' => $validated['jenis'],
             'nominal' => $cleanedNominal,
             'keterangan' => $validated['keterangan'],
             'user_id' => auth()->id(),
-            'family_id' => auth()->user()->family_id,
-        ]);
+        ];
+
+        if (auth()->user()->current_group_id) {
+            $tabunganData['group_id'] = auth()->user()->current_group_id;
+        }
+
+        $tabungan = Tabungan::create($tabunganData);
 
         // Jika ada gambar yang di-upload, loop dan simpan
         if ($request->hasFile('images')) {

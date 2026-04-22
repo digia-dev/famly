@@ -36,11 +36,11 @@ class CmsApiController extends ApiController
         return $this->success([
             'dashboard' => [
                 'active_users' => User::count(),
-                'total_families' => \App\Models\Family::count(),
-                'total_transactions' => Tabungan::count(),
-                'transaction_volume' => Tabungan::sum('nominal'),
+                'total_groups' => \App\Models\Group::count(),
+                'total_transactions' => Tabungan::withoutGlobalScopes()->count(),
+                'transaction_volume' => Tabungan::withoutGlobalScopes()->sum('nominal'),
                 'recent_logs' => ActivityLog::with('user')->latest()->take(10)->get(),
-                'recent_transactions' => Tabungan::with(['user.family', 'kategoriNama', 'kategoriJenis'])->latest()->take(5)->get(),
+                'recent_transactions' => Tabungan::withoutGlobalScopes()->with(['user.currentGroup', 'kategoriNama', 'kategoriJenis'])->latest()->take(5)->get(),
                 'volume_history' => $history,
                 'role_distribution' => User::select('role', DB::raw('count(*) as count'))->groupBy('role')->get(),
                 'system_health' => [
@@ -65,7 +65,7 @@ class CmsApiController extends ApiController
      */
     public function transactions(Request $request)
     {
-        $query = Tabungan::with(['user.family', 'kategoriNama', 'kategoriJenis'])
+        $query = Tabungan::withoutGlobalScopes()->with(['user.currentGroup', 'kategoriNama', 'kategoriJenis'])
             ->latest();
 
         if ($request->search) {
@@ -102,12 +102,12 @@ class CmsApiController extends ApiController
         ->orderBy('date', 'asc')
         ->get();
 
-        // Top Contributing Families
-        $topFamilies = DB::table('families')
-            ->join('users', 'families.id', '=', 'users.family_id')
+        // Top Contributing Groups
+        $topFamilies = DB::table('groups')
+            ->join('users', 'groups.id', '=', 'users.group_id')
             ->join('tabungans', 'users.id', '=', 'tabungans.user_id')
-            ->select('families.family_name', DB::raw('SUM(tabungans.nominal) as contribution'))
-            ->groupBy('families.family_name')
+            ->select('groups.name', DB::raw('SUM(tabungans.nominal) as contribution'))
+            ->groupBy('groups.name')
             ->orderBy('contribution', 'desc')
             ->take(5)
             ->get();
@@ -126,8 +126,8 @@ class CmsApiController extends ApiController
      */
     public function wallets()
     {
-        $wallets = \App\Models\KategoriNamaTabungan::all()->map(function($wallet) {
-            $in = Tabungan::where('nama', $wallet->id)
+        $wallets = \App\Models\KategoriNamaTabungan::withoutGlobalScopes()->get()->map(function($wallet) {
+            $in = Tabungan::withoutGlobalScopes()->where('nama', $wallet->id)
                 ->whereHas('kategoriJenis', fn($q) => $q->where('jenis', 'Pemasukan'))
                 ->sum('nominal');
                 

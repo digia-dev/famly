@@ -17,17 +17,17 @@ class ProfileController extends Controller
     public function edit(Request $request): View
     {
         $user = $request->user();
-        $familyMembers = [];
+        $groupMembers = [];
 
-        if ($user->family_id) {
-            $familyMembers = \App\Models\User::where('family_id', $user->family_id)
+        if ($user->group_id) {
+            $groupMembers = \App\Models\User::where('group_id', $user->group_id)
                 ->where('id', '!=', $user->id)
                 ->get();
         }
 
         return view('profile.edit', [
             'user' => $user,
-            'familyMembers' => $familyMembers,
+            'groupMembers' => $groupMembers,
         ]);
     }
 

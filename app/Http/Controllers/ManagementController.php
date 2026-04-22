@@ -23,7 +23,7 @@ class ManagementController extends Controller
     public function index(Request $request)
     {
         $user = Auth::user();
-        $familyId = $user->family_id;
+        $groupId = $user->current_group_id;
         
         // Determine active type from query param, default to 'pos'
         $type = $request->get('type', 'pos');
@@ -31,11 +31,12 @@ class ManagementController extends Controller
 
         // Check if we need to show the detail view
         if ($id) {
-            $kategori = KategoriNamaTabungan::where('family_id', $familyId)->findOrFail($id);
+            $kategori = KategoriNamaTabungan::findOrFail($id);
+
             $walletData = $this->calculateBalances(collect([$kategori]))->first();
+            
             $transactions = Tabungan::with('kategoriJenis')
                 ->where('nama', $id)
-                ->where('family_id', $familyId)
                 ->orderBy('created_at', 'desc')
                 ->get();
 
@@ -46,15 +47,15 @@ class ManagementController extends Controller
         $typeMap = [
             'pos' => 'pos',
             'dompet' => 'wallet',
-            'tabungan' => 'savings'
+            'wallet' => 'wallet',
+            'tabungan' => 'savings',
+            'savings' => 'savings'
         ];
         
         $walletType = $typeMap[$type] ?? 'pos';
 
-        // Fetch categories for the specific type
-        $categories = KategoriNamaTabungan::where('family_id', $familyId)
-            ->where('wallet_type', $walletType)
-            ->get();
+        // Fetch categories for the specific type (Scoped by GroupScope)
+        $categories = KategoriNamaTabungan::where('wallet_type', $walletType)->get();
 
         $wallets = $this->calculateBalances($categories);
         
@@ -64,15 +65,13 @@ class ManagementController extends Controller
         $startOfLastMonth = $now->copy()->subMonth()->startOfMonth();
         $endOfLastMonth = $now->copy()->subMonth()->endOfMonth();
 
-        // Monthly Transactions for this category type
+        // Monthly Transactions for this category type (Scoped by GroupScope)
         $monthlyTransactions = Tabungan::with('kategoriJenis')
-            ->where('family_id', $familyId)
             ->whereIn('nama', $categories->pluck('id'))
             ->whereBetween('created_at', [$startOfMonth, $now])
             ->get();
 
         $lastMonthTransactions = Tabungan::with('kategoriJenis')
-            ->where('family_id', $familyId)
             ->whereIn('nama', $categories->pluck('id'))
             ->whereBetween('created_at', [$startOfLastMonth, $endOfLastMonth])
             ->get();
@@ -141,17 +140,25 @@ class ManagementController extends Controller
         ]);
 
         // 1. Create the Category/Wallet Entity
-        $wallet = KategoriNamaTabungan::create([
+        $walletData = [
             'nama' => $request->nama,
             'kategori_kas' => $request->kategori_kas,
             'target_saldo' => $request->target_saldo,
             'icon' => $request->icon ?? 'account_balance',
             'wallet_type' => $request->wallet_type ?? 'pos',
             'status' => $request->status ?? 'AKTIF',
-            'color' => $request->color ?? '#006d36',
+            'color' => $request->color ?? '#00AA13',
             'description' => $request->description,
-            'family_id' => auth()->user()->family_id,
-        ]);
+        ];
+
+        // Group Orchestration
+        if (auth()->user()->current_group_id) {
+            $walletData['group_id'] = auth()->user()->current_group_id;
+        } else {
+            $walletData['user_id'] = auth()->id();
+        }
+
+        $wallet = KategoriNamaTabungan::create($walletData);
 
         // 2. Logic: If there is an initial balance/target (for Pos/Wallet), 
         // create an initial transaction so the logic calculated in index is correct.
@@ -161,14 +168,21 @@ class ManagementController extends Controller
             $jenis = \App\Models\KategoriJenisTabungan::where('jenis', 'Pemasukan')->first();
             
             if ($jenis) {
-                Tabungan::create([
+                $trxData = [
                     'nama' => $wallet->id,
                     'jenis' => $jenis->id,
                     'nominal' => $request->target_saldo,
                     'keterangan' => 'Saldo Awal: ' . $wallet->nama,
-                    'family_id' => auth()->user()->family_id,
                     'created_at' => now(),
-                ]);
+                ];
+
+                if (auth()->user()->current_group_id) {
+                    $trxData['group_id'] = auth()->user()->current_group_id;
+                } else {
+                    $trxData['user_id'] = auth()->id();
+                }
+
+                Tabungan::create($trxData);
             }
         }
 
@@ -213,7 +227,7 @@ class ManagementController extends Controller
             'nama' => 'required|string|max:255',
         ]);
 
-        $kategori = KategoriNamaTabungan::where('family_id', Auth::user()->family_id)->findOrFail($id);
+        $kategori = KategoriNamaTabungan::findOrFail($id);
         $kategori->update(['nama' => $request->nama]);
 
         return response()->json(['success' => true, 'nama' => $kategori->nama]);
@@ -226,13 +240,11 @@ class ManagementController extends Controller
     {
         if ($categories->isEmpty()) return collect();
 
-        $familyId = Auth::user()->family_id;
         $categoryIds = $categories->pluck('id')->toArray();
 
-        // Single aggregated query to replace the N+1 loop
+        // Single aggregated query to replace the N+1 loop (Scoped by GroupScope)
         $stats = Tabungan::query()
             ->join('kategori_jenis_tabungans', 'tabungans.jenis', '=', 'kategori_jenis_tabungans.id')
-            ->where('tabungans.family_id', $familyId)
             ->whereIn('tabungans.nama', $categoryIds)
             ->select('tabungans.nama as category_id', \DB::raw("
                 SUM(CASE WHEN kategori_jenis_tabungans.jenis = 'Pemasukan' THEN tabungans.nominal ELSE 0 END) as total_in,

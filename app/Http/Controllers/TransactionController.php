@@ -17,9 +17,8 @@ class TransactionController extends Controller
         $user = Auth::user();
         $filter = $request->get('filter', 'week');
 
-        // Gunakan query builder yang bersih
-        $query = Tabungan::with(['kategoriNama', 'kategoriJenis'])
-            ->where('family_id', $user->family_id);
+        // Use clean query builder (Scoped by GroupScope)
+        $query = Tabungan::with(['kategoriNama', 'kategoriJenis']);
 
         // Filter Logika
         if ($filter == 'week') {
@@ -54,14 +53,15 @@ class TransactionController extends Controller
     public function create(Request $request)
     {
         $user = Auth::user();
-        $family_id = $user->family_id;
+        $groupId = $user->current_group_id;
         
         $selectedWalletId = $request->get('wallet_id');
         $activeWallet = null;
-        // Get all categories grouped by type for the unified creator
-        $wallets = \App\Models\KategoriNamaTabungan::where('family_id', $family_id)->where('wallet_type', 'wallet')->get();
-        $posItems = \App\Models\KategoriNamaTabungan::where('family_id', $family_id)->where('wallet_type', 'pos')->get();
-        $savings = \App\Models\KategoriNamaTabungan::where('family_id', $family_id)->where('wallet_type', 'savings')->get();
+        
+        // Get all categories grouped by type (Scoped by GroupScope)
+        $wallets = \App\Models\KategoriNamaTabungan::where('wallet_type', 'wallet')->get();
+        $posItems = \App\Models\KategoriNamaTabungan::where('wallet_type', 'pos')->get();
+        $savings = \App\Models\KategoriNamaTabungan::where('wallet_type', 'savings')->get();
         
         $types = \App\Models\KategoriJenisTabungan::whereIn('jenis', ['Pemasukan', 'Pengeluaran'])->get();
 
@@ -93,15 +93,20 @@ class TransactionController extends Controller
         }
 
         // 1. Record the primary transaction
-        $transaction = Tabungan::create([
+        $trxData = [
             'nama' => $request->wallet_id,
             'jenis' => $request->jenis_id,
             'nominal' => $request->nominal,
             'keterangan' => $request->keterangan,
-            'family_id' => $user->family_id,
-            'status' => 'Lunas',
+            'user_id' => $user->id,
             'created_at' => $request->created_at ?? now(),
-        ]);
+        ];
+
+        if ($user->current_group_id) {
+            $trxData['group_id'] = $user->current_group_id;
+        }
+
+        $transaction = Tabungan::create($trxData);
 
         // RULE: IF POS EXPENSE -> Deduct from Source Wallet (Dompet)
         if ($targetWallet->wallet_type == 'pos' && $jenis->jenis == 'Pengeluaran' && $request->source_wallet_id) {
@@ -110,7 +115,8 @@ class TransactionController extends Controller
                 'jenis' => $jenis->id, // Same expense type
                 'nominal' => $request->nominal,
                 'keterangan' => "Auto: " . $request->keterangan . " (via Pos " . $targetWallet->nama . ")",
-                'family_id' => $user->family_id,
+                'user_id' => $user->id,
+                'group_id' => $user->current_group_id,
                 'status' => 'Lunas',
                 'created_at' => $request->created_at ?? now(),
             ]);
@@ -123,7 +129,8 @@ class TransactionController extends Controller
                 'jenis' => $jenis->id,
                 'nominal' => $request->nominal,
                 'keterangan' => "Auto: " . $request->keterangan . " (via " . $targetWallet->nama . ")",
-                'family_id' => $user->family_id,
+                'user_id' => $user->id,
+                'group_id' => $user->current_group_id,
                 'status' => 'Lunas',
                 'created_at' => $request->created_at ?? now(),
             ]);

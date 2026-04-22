@@ -16,6 +16,7 @@ use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\TransactionController;
 use App\Http\Controllers\ViewerController;
 use App\Http\Controllers\DiscoveryController;
+use App\Http\Controllers\GroupJoinController;
 use Illuminate\Support\Facades\Http;
 
 use Laravel\Sanctum\PersonalAccessToken;
@@ -140,6 +141,7 @@ Route::middleware(['auth', 'role:dins'])->group(function () {
         'update' => 'agenda.update',
         'destroy' => 'agenda.destroy',
     ]);
+    Route::post('/agenda/ai-check-in', [AgendaController::class, 'aiCheckIn'])->name('agenda.ai-check-in');
     Route::post('/agenda/{id}/complete', [AgendaController::class, 'complete'])->name('agenda.complete');
     Route::post('/agenda/bulk-delete', [AgendaController::class, 'bulkDelete'])->name('agenda.bulk-delete');
     Route::patch('/agenda/{id}/timeline', [AgendaController::class, 'toggleTimeline'])->name('agenda.timeline.toggle');
@@ -167,7 +169,13 @@ Route::middleware(['auth', 'role:dins'])->group(function () {
     Route::resource('kategori-jenis-tabungan', KategoriJenisTabunganController::class)->names('kategori.jenis');
 
     // Analisis Reports
+    Route::get('/reports', [ReportController::class, 'index'])->name('reports.index');
     Route::get('/reports/analysis', [ReportController::class, 'categoryAnalysis'])->name('reports.analysis');
+    Route::get('/reports/download', [ReportController::class, 'download'])->name('reports.download');
+
+    // Subscription & Monetization
+    Route::post('/subscription/upgrade', [ReportController::class, 'upgradeSubscription'])->name('subscription.upgrade');
+    Route::post('/reports/buy-one-off', [ReportController::class, 'buyOneOffReport'])->name('reports.buy-one-off');
 
     // AI Features (Moved to DiscoveryController)
     Route::get('/ai/scan-struk', [DiscoveryController::class, 'aiScan'])->name('ai.scan-struk');
@@ -181,7 +189,34 @@ Route::middleware(['auth', 'role:dins'])->group(function () {
     Route::post('/check-in', [App\Http\Controllers\AdminController::class, 'checkIn'])->name('user.check-in');
     Route::patch('/agenda/{id}/toggle', [AdminController::class, 'toggleAgenda'])->name('agenda.toggle');
     Route::get('/eksplor', [DiscoveryController::class, 'index'])->name('eksplor.index');
+
+    // Group Management & Workspace
+    Route::get('/groups', [App\Http\Controllers\GroupController::class, 'index'])->name('groups.index');
+    Route::get('/groups/{id}', [App\Http\Controllers\GroupController::class, 'show'])->name('groups.show');
+    Route::get('/groups/{id}/members', [App\Http\Controllers\GroupController::class, 'members'])->name('groups.members');
+    Route::post('/groups', [App\Http\Controllers\GroupController::class, 'store'])->name('groups.store');
+    Route::post('/groups/switch/{id}', [App\Http\Controllers\GroupController::class, 'switch'])->name('groups.switch');
+    Route::post('/groups/{groupId}/accept/{userId}', [App\Http\Controllers\GroupController::class, 'acceptMember'])->name('groups.accept');
+    Route::post('/groups/{groupId}/reject/{userId}', [App\Http\Controllers\GroupController::class, 'rejectMember'])->name('groups.reject');
+
+    // SUBSCRIPTION HUB
+    Route::get('/subscription', [App\Http\Controllers\SubscriptionController::class, 'index'])->name('subscription.index');
+    Route::post('/subscription/upgrade', [App\Http\Controllers\SubscriptionController::class, 'upgrade'])->name('subscription.upgrade');
+    Route::post('/subscription/group-activation', [App\Http\Controllers\SubscriptionController::class, 'buyGroupActivation'])->name('subscription.group-activation');
+
+    // CHECKOUT SYSTEM
+    Route::get('/checkout', [App\Http\Controllers\CheckoutController::class, 'index'])->name('checkout.index');
+    Route::get('/checkout/processing', [App\Http\Controllers\CheckoutController::class, 'processing'])->name('checkout.processing');
+    Route::post('/checkout/finalize', [App\Http\Controllers\CheckoutController::class, 'finalize'])->name('checkout.finalize');
+    Route::get('/checkout/success', [App\Http\Controllers\CheckoutController::class, 'success'])->name('checkout.success');
+
+    // PERSONAL WORKSPACE
+    Route::get('/personal/workspace', [App\Http\Controllers\GroupController::class, 'personalWorkspace'])->name('personal.workspace');
 });
+
+// Join Group via Link (Public - landing page)
+Route::get('/join/{code}', [App\Http\Controllers\GroupController::class, 'join'])->name('groups.join');
+Route::post('/join/{code}/request', [App\Http\Controllers\GroupController::class, 'requestToJoin'])->name('groups.join.request')->middleware(['auth', 'verified']);
 
 // =======================
 // Auth Routes

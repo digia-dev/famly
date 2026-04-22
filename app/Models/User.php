@@ -2,14 +2,14 @@
 
 namespace App\Models;
 
-// use Illuminate\Contracts\Auth\MustVerifyEmail;
+use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-class User extends Authenticatable
+class User extends Authenticatable implements MustVerifyEmail
 {
     use HasApiTokens, HasFactory, Notifiable;
 
@@ -22,8 +22,12 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
-        'family_id',
+        'group_id', 
+        'current_group_id',
         'role',
+        'subscription_status',
+        'subscription_until',
+        'ai_usage_count',
     ];
 
     /**
@@ -44,6 +48,7 @@ class User extends Authenticatable
     protected $casts = [
         'email_verified_at' => 'datetime',
         'password' => 'hashed',
+        'subscription_until' => 'datetime',
     ];
 
     public function tabungan()
@@ -51,9 +56,21 @@ class User extends Authenticatable
         return $this->hasMany(Tabungan::class);
     }
 
-    public function family()
+    public function groups()
     {
-        return $this->belongsTo(Family::class);
+        return $this->belongsToMany(Group::class, 'group_members')
+                    ->withPivot(['role', 'status'])
+                    ->withTimestamps();
+    }
+
+    public function currentGroup()
+    {
+        return $this->belongsTo(Group::class, 'current_group_id');
+    }
+
+    public function wallets()
+    {
+        return $this->hasMany(KategoriNamaTabungan::class, 'user_id');
     }
 
     public function familyRoles()
@@ -64,6 +81,20 @@ class User extends Authenticatable
     public function activityLogs()
     {
         return $this->hasMany(ActivityLog::class);
+    }
+
+    /**
+     * Check if user is a premium subscriber.
+     */
+    public function isPremium(): bool
+    {
+        return $this->subscription_status === 'subscriber' && 
+               ($this->subscription_until === null || $this->subscription_until > now());
+    }
+
+    public function notifications()
+    {
+        return $this->hasMany(Notification::class);
     }
 }
 
